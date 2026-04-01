@@ -34,4 +34,12 @@ def get_db(db_path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+
+    # Migrations — idempotent column additions
+    try:
+        conn.execute("ALTER TABLE cache_edna_items ADD COLUMN guideline TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     return conn

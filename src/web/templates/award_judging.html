@@ -41,6 +41,12 @@
     .link-cell a { color: #1565c0; text-decoration: none; font-size: 13px; }
     .link-cell a:hover { text-decoration: underline; }
 
+    .guide-select { padding: 2px 4px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-weight: 600; background: white; cursor: pointer; }
+    .guide-select:focus { outline: none; border-color: #662d91; }
+    .btn-judge { background: #662d91; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; }
+    .btn-judge:hover { background: #7b3aab; }
+    .btn-judge:disabled { opacity: 0.5; cursor: not-allowed; }
+
     .empty-state { text-align: center; padding: 60px 20px; color: #888; }
     .empty-state p { margin-bottom: 12px; }
 </style>
@@ -93,6 +99,8 @@
                         <th>Writer</th>
                         <th>Reviewer</th>
                         <th>Edna Review</th>
+                        <th>Guide</th>
+                        <th>Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -124,6 +132,22 @@
                                 {{ item.edna_review_link_text }}
                             {% else %}—{% endif %}
                         </td>
+                        <td>
+                            <select class="guide-select"
+                                    data-monday-id="{{ item.monday_id }}"
+                                    onchange="saveGuideline(this)">
+                                <option value="m" {% if item.guideline == 'm' %}selected{% endif %}>m</option>
+                                <option value="s" {% if item.guideline != 'm' %}selected{% endif %}>s</option>
+                            </select>
+                        </td>
+                        <td>
+                            {% if item.edna_status == 'Pending' %}
+                            <button class="btn-judge"
+                                    data-name="{{ item.name | e }}"
+                                    data-monday-id="{{ item.monday_id }}"
+                                    onclick="launchJudge(this)">Judge</button>
+                            {% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -146,6 +170,49 @@ function toggleGroup(header) {
     if (wrap) {
         wrap.style.display = header.classList.contains('collapsed') ? 'none' : '';
     }
+}
+
+function saveGuideline(sel) {
+    fetch('/api/judging/guideline', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            monday_id: sel.dataset.mondayId,
+            guideline: sel.value,
+        })
+    }).catch(err => alert('Failed to save guideline: ' + err.message));
+}
+
+function launchJudge(btn) {
+    const row = btn.closest('tr');
+    const guideline = row.querySelector('.guide-select').value;
+    btn.disabled = true;
+    btn.textContent = 'Launching...';
+
+    fetch('/api/judging/launch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            monday_id: btn.dataset.mondayId,
+            name: btn.dataset.name,
+            guideline: guideline,
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            btn.textContent = 'Launched';
+        } else {
+            btn.disabled = false;
+            btn.textContent = 'Judge';
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.textContent = 'Judge';
+        alert('Failed to launch: ' + err.message);
+    });
 }
 </script>
 {% endblock %}

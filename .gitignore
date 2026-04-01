@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Database
+data/*.db
+
+# Environment / secrets
+.env
+credentials.json
+token.json
+config/*.json
+config/settings.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local config
+.claude/
+
+# Runtime database (root level)
+delivery_hub.db

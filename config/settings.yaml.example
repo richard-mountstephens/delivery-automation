@@ -1,0 +1,17 @@
+database:
+  path: delivery_hub.db
+
+monday:
+  boards:
+    edna_tracker: 2026518054
+
+  columns:
+    edna_tracker:
+      award: lookup_mkrv186d
+      category: lookup_mkrv1azg
+      edna_status: color_mkrtb6ve
+      triage_score: numeric_mkrt82e4
+      writer: lookup_mkrvgebv
+      reviewer: lookup_mkrvdj25
+      edna_review_link: link_mkrtamnn
+      tracker_submission: board_relation_mkrtpt20

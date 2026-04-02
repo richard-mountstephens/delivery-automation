@@ -6,6 +6,7 @@ import logging
 import httpx
 
 from src.adapters.models import EdnaItem
+from src.adapters.submission_models import SubmissionItem
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ class MondayAdapter:
                 "Authorization": api_token,
                 "Content-Type": "application/json",
             },
-            timeout=30.0,
+            timeout=90.0,
         )
 
     def get_edna_items(self) -> list[EdnaItem]:
@@ -62,6 +63,58 @@ class MondayAdapter:
                 logger.warning("Skipping edna item %s: parse error", item["id"], exc_info=True)
 
         return edna_items
+
+    def get_submission_items(self) -> list[SubmissionItem]:
+        """Fetch all items from the New Award Submission Tracker board."""
+        board_id = self.boards["submission_tracker"]
+        col_map = self.columns["submission_tracker"]
+
+        items = self._fetch_board_items(board_id, label="submission tracker")
+
+        submission_items: list[SubmissionItem] = []
+        for item in items:
+            cols = _parse_column_values(item["column_values"])
+            try:
+                group = item.get("group")
+                board_group = group["title"] if group else None
+
+                # Checkbox: parse from JSON value
+                escalate = _checkbox(cols, col_map["escalate"])
+
+                sub = SubmissionItem(
+                    monday_id=item["id"],
+                    name=item["name"],
+                    board_group=board_group,
+                    delivery_status=_text(cols, col_map["delivery_status"]),
+                    sales_status=_text(cols, col_map["sales_status"]),
+                    writer=_text(cols, col_map["writer"]),
+                    reviewer=_text(cols, col_map["reviewer"]),
+                    close_date=_text(cols, col_map["close_date"]),
+                    target_finish_date=_text(cols, col_map["target_finish_date"]),
+                    extension_date=_text(cols, col_map["extension_date"]),
+                    category=_text(cols, col_map["category"]),
+                    company=_text(cols, col_map["company"]),
+                    award=_text(cols, col_map["award"]),
+                    escalate=escalate,
+                    date_alert=_text(cols, col_map["date_alert"]),
+                    writer_alert=_text(cols, col_map["writer_alert"]),
+                    metrics_alert=_text(cols, col_map["metrics_alert"]),
+                    asset_alert=_text(cols, col_map["asset_alert"]),
+                    contingency_days=_text(cols, col_map["contingency_days"]),
+                    spare_days_est=_text(cols, col_map["spare_days_est"]),
+                    days_since=_text(cols, col_map["days_since"]),
+                    metrics_status=_text(cols, col_map["metrics_status"]),
+                    asset_status=_text(cols, col_map["asset_status"]),
+                    asset_days_since=_text(cols, col_map["asset_days_since"]),
+                    writer_due=_text(cols, col_map["writer_due"]),
+                    reviewer_due=_text(cols, col_map["reviewer_due"]),
+                    monday_updated_at=item.get("updated_at"),
+                )
+                submission_items.append(sub)
+            except Exception:
+                logger.warning("Skipping submission item %s: parse error", item["id"], exc_info=True)
+
+        return submission_items
 
     # -- Internal helpers -----------------------------------------------------
 
@@ -128,7 +181,8 @@ def _build_items_query(board_id: int, cursor: str | None) -> str:
         " cursor items { id name created_at updated_at group { title }"
         " column_values { id text value"
         " ... on MirrorValue { display_value }"
-        " ... on BoardRelationValue { linked_item_ids }"
+        " ... on FormulaValue { display_value }"
+        " ... on BoardRelationValue { display_value linked_item_ids }"
         " } } } } }"
     )
 
@@ -150,7 +204,7 @@ def _text(cols: dict[str, dict], col_id: str) -> str | None:
     if text is None or text.strip() == "":
         # Mirror columns use display_value instead of text
         text = cv.get("display_value")
-    if text is None or (isinstance(text, str) and text.strip() == ""):
+    if text is None or (isinstance(text, str) and text.strip() in ("", "null")):
         return None
     return text.strip() if isinstance(text, str) else str(text)
 
@@ -164,6 +218,23 @@ def _number(cols: dict[str, dict], col_id: str) -> float | None:
         return float(text)
     except ValueError:
         return None
+
+
+def _checkbox(cols: dict[str, dict], col_id: str) -> bool:
+    """Extract a boolean from a checkbox column."""
+    cv = cols.get(col_id)
+    if cv is None:
+        return False
+    raw = cv.get("value")
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            return parsed.get("checked") == "true"
+        except (json.JSONDecodeError, TypeError):
+            pass
+    # Fallback: text field shows "v" when checked
+    text = cv.get("text", "")
+    return text.strip().lower() in ("v", "true", "yes")
 
 
 def _link(cols: dict[str, dict], col_id: str) -> tuple[str | None, str | None]:

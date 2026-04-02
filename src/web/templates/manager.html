@@ -1,0 +1,1111 @@
+{% extends "base.html" %}
+{% block title %}Co-ordinator — Delivery Hub{% endblock %}
+{% block content %}
+{% macro status_badge(status) %}
+{% if status %}
+{% set slug = status | lower | replace(' - ', '-') | replace(' & ', '-') | replace(' ', '-') | replace('_', '-') %}
+{% set css_map = {
+    'awaiting-to-open': 'status-awaiting-to-open',
+    'delivery-setup': 'status-delivery-setup',
+    'confirm-hours': 'status-confirm-hours',
+    'writer-briefed': 'status-writer-briefed',
+    'with-writer': 'status-with-writer',
+    'with-velma': 'status-with-velma',
+    'with-reviewer': 'status-with-reviewer',
+    'ready-hold': 'status-ready-hold',
+    'reviewed-new-link': 'status-reviewed-new-link',
+    'with-client': 'status-with-client',
+    '2nd-writer-review': 'status-2nd-writer-review',
+    '2nd-client-review': 'status-2nd-client-review',
+    'with-reviewer-final': 'status-with-reviewer-final',
+    'with-client-for-final-approval': 'status-with-client-final-approval',
+    'with-c-to-upload': 'status-with-c-to-upload',
+    'upload-pending': 'status-upload-pending',
+    'approved-to-submit': 'status-approved-to-submit',
+    'with-client-escalate': 'status-with-client-escalate',
+    'pending-aggregator-approval': 'status-pending-aggregator-approval',
+    'submitted': 'status-submitted',
+    'next-best-offer': 'status-next-best-offer',
+    'dnp-but-billed': 'status-dnp-but-billed',
+    'submission-issue': 'status-submission-issue',
+    'edna-writer-review': 'status-edna-writer-review',
+} %}
+<span class="status-badge {{ css_map.get(slug, 'status-unknown') }}">{{ status }}</span>
+{% else %}—{% endif %}
+{% endmacro %}
+
+{% macro metrics_badge(status) %}
+{% if status %}
+{% set css_map = {
+    'Asked Client': 'metrics-asked',
+    'Reviewed': 'metrics-reviewed',
+    'Repurposed': 'metrics-repurposed',
+    'Client Provided': 'metrics-provided',
+    'Not Required': 'metrics-not-required',
+} %}
+<span class="status-badge {{ css_map.get(status, 'status-unknown') }}">{{ status }}</span>
+{% else %}—{% endif %}
+{% endmacro %}
+
+{% macro asset_badge(status) %}
+{% if status %}
+{% set css_map = {
+    'Working on it': 'asset-working',
+    'Done': 'asset-done',
+    'Approved': 'asset-approved',
+    'For Edna Review': 'asset-edna-review',
+    'Briefed': 'asset-briefed',
+    'Required': 'asset-required',
+    'Not Required': 'asset-not-required',
+    'Following-up Client': 'asset-following-up',
+    'Collected Previous': 'asset-collected',
+    'For  Final Approval': 'asset-final-approval',
+    'Client Tagged': 'asset-client-tagged',
+    'Edna\'d and following up': 'asset-edna-following',
+    'Updates Requested': 'asset-updates-requested',
+} %}
+<span class="status-badge {{ css_map.get(status, 'status-unknown') }}">{{ status }}</span>
+{% else %}—{% endif %}
+{% endmacro %}
+
+{% macro alert_explain(alert_value, item) %}
+{% if alert_value == 'Target Date Issue (Pre-Review)' -%}
+Target finish date ({{ item.target_finish_date or '?' }}) has passed or exceeds the {{ 'extension date (' + item.extension_date + ')' if item.extension_date else 'close date (' + (item.close_date or '?') + ')' }}. Item is pre-review ("{{ item.delivery_status or '?' }}") — the ball is with {{ item.writer or 'the writer' }}. Needs immediate attention to get back on track.
+{%- elif alert_value == 'Target Date Issue (Post-Review)' -%}
+Target finish date ({{ item.target_finish_date or '?' }}) has passed or exceeds the {{ 'extension date (' + item.extension_date + ')' if item.extension_date else 'close date (' + (item.close_date or '?') + ')' }}. Item is post-review ("{{ item.delivery_status or '?' }}") — likely with the co-ordinator or client. Urgent — close to final submission.
+{%- elif alert_value == 'Target Date Blank' -%}
+No target finish date set, and item is past the early stages ("{{ item.delivery_status or '?' }}"). From With Writer onwards, every item needs a target date. Close date: {{ item.close_date or '?' }}.
+{%- elif alert_value == 'Target after close' -%}
+Target finish date ({{ item.target_finish_date or '?' }}) is after the close date ({{ item.close_date or '?' }}). This item has been extended — informational, monitor the revised deadline.
+{%- elif alert_value == 'Escalated' -%}
+This submission has been manually flagged for escalation. Check with the team on what triggered the escalation.
+{%- elif alert_value == 'Writer Date Blank' -%}
+Writer due date not set for {{ item.writer or 'the assigned writer' }}. Status: "{{ item.delivery_status or '?' }}" (writer stage). Set a due date so the writer can manage their workload.
+{%- elif alert_value == 'Writer Late' -%}
+Writer due date has passed. Submission is still with {{ item.writer or 'the writer' }} ("{{ item.delivery_status or '?' }}"). Follow up on progress — is the writer blocked or overloaded?
+{%- elif alert_value == 'Reviewer Date Blank' -%}
+Reviewer due date not set. Status: "{{ item.delivery_status or '?' }}" (reviewer stage). Assign a due date to the reviewer.
+{%- elif alert_value == 'Reviewer Late' -%}
+Reviewer due date has passed. Follow up with the reviewer on progress.
+{%- elif alert_value == 'Metric Alert (Urgent)' -%}
+Metrics not confirmed and target finish date is within 5 days. Close date: {{ item.close_date or '?' }}. Chase the client for metrics data immediately.
+{%- elif alert_value == 'Metric Alert (Pre-Review)' -%}
+Metrics waiting for more than 5 days during the pre-review phase ("{{ item.delivery_status or '?' }}"). Chase the client for performance data. Close date: {{ item.close_date or '?' }}.
+{%- elif alert_value == 'Metric Alert (Post-Review)' -%}
+Metrics waiting for more than 2 days during post-review ("{{ item.delivery_status or '?' }}"). This is blocking finalisation. Close date: {{ item.close_date or '?' }}.
+{%- elif alert_value == 'Asset Alert (Urgent)' -%}
+Attachment pack not complete and target finish date is within 5 days. Close date: {{ item.close_date or '?' }}. Prioritise asset completion immediately.
+{%- elif alert_value == 'Asset Alert (Pre-Review)' -%}
+Assets waiting for more than 5 days during pre-review ("{{ item.delivery_status or '?' }}"). Check the Briefed Asset Tracker for status. Close date: {{ item.close_date or '?' }}.
+{%- elif alert_value == 'Asset Alert (Post-Review)' -%}
+Assets waiting for more than 2 days during post-review ("{{ item.delivery_status or '?' }}"). This is blocking finalisation. Close date: {{ item.close_date or '?' }}.
+{%- else -%}
+{{ alert_value }}. Check this item in Monday for details.
+{%- endif %}
+{% endmacro %}
+<style>
+    .manager-layout { display: flex; gap: 20px; min-height: calc(100vh - 120px); }
+    .dashboard-panel { flex: 1; min-width: 0; }
+    .chat-panel { width: 480px; flex-shrink: 0; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .page-header h2 { font-size: 20px; font-weight: 700; color: #1a1a2e; }
+    .header-actions { display: flex; align-items: center; gap: 12px; }
+    .sync-status { font-size: 13px; color: #888; }
+    .btn-refresh { background: #662d91; color: white; border: none; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .btn-refresh:hover { background: #7b3aab; }
+    .btn-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-refresh .loading { display: none; }
+    .btn-refresh.htmx-request .loading { display: inline; }
+    .btn-refresh.htmx-request .idle { display: none; }
+    .btn-analyse { background: #1565c0; color: white; border: none; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .btn-analyse:hover { background: #1976d2; }
+    .btn-analyse:disabled { opacity: 0.5; cursor: not-allowed; }
+    .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 4px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Sections */
+    .section { margin-bottom: 24px; }
+    .section-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px 8px 0 0; cursor: pointer; user-select: none; }
+    .section-header:hover { background: #eef0f2; }
+    .section-header.collapsed { border-radius: 8px; }
+    .section-chevron { font-size: 12px; color: #666; transition: transform 0.2s; width: 16px; text-align: center; }
+    .section-header.collapsed .section-chevron { transform: rotate(-90deg); }
+    .section-title { font-size: 14px; font-weight: 700; color: #1a1a2e; }
+    .section-count { font-size: 12px; color: #888; font-weight: 500; }
+    .section-body { border: 1px solid #e9ecef; border-top: none; border-radius: 0 0 8px 8px; padding: 16px; background: white; }
+    .section-header.collapsed + .section-body { display: none; }
+
+    /* Alert table */
+    .alert-table { border-radius: 0 0 8px 8px; }
+    .alert-table th { position: sticky; top: 0; z-index: 1; cursor: pointer; user-select: none; }
+    .alert-table th:hover { background: #eef0f2; }
+    .alert-table th .sort-arrow { font-size: 10px; margin-left: 4px; color: #aaa; }
+    .alert-table td { vertical-align: middle; font-size: 13px; }
+    .alert-table td:first-child { max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; color: #1565c0; }
+    .alert-table td:first-child:hover { text-decoration: underline; }
+    .alert-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600; margin-right: 4px; margin-bottom: 2px; cursor: help; position: relative; }
+    .alert-badge.date { background: #fde8e8; color: #c62828; }
+    .alert-badge.writer { background: #fff3e0; color: #b86e00; }
+    .alert-badge.metrics { background: #f3e5f5; color: #7b1fa2; }
+    .alert-badge.asset { background: #e3f2fd; color: #1565c0; }
+    .alert-badge.escalated { background: #fde8e8; color: #c62828; }
+
+    /* Alert tooltip */
+    .alert-tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: #1a1a2e; color: white; padding: 8px 12px; border-radius: 6px; font-size: 11px; font-weight: 400; line-height: 1.4; white-space: normal; width: 280px; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.15); pointer-events: none; text-transform: none; letter-spacing: 0; }
+    .alert-tooltip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: #1a1a2e; }
+    .alert-badge:hover .alert-tooltip { display: block; }
+    .monday-link { color: #1565c0; text-decoration: none; font-size: 12px; }
+    .monday-link:hover { text-decoration: underline; }
+
+    /* Monday.com delivery status colors */
+    .status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; color: white; white-space: nowrap; }
+    .status-awaiting-to-open { background: #a9bee8; color: #333; }
+    .status-delivery-setup { background: #784bd1; }
+    .status-confirm-hours { background: #ff6d3b; }
+    .status-writer-briefed { background: #579bfc; }
+    .status-with-writer { background: #007eb5; }
+    .status-with-velma { background: #7e3b8a; }
+    .status-with-reviewer { background: #66ccff; color: #333; }
+    .status-ready-hold { background: #037f4c; }
+    .status-reviewed-new-link { background: #ff5ac4; }
+    .status-with-client { background: #9cd326; color: #333; }
+    .status-2nd-writer-review { background: #a1e3f6; color: #333; }
+    .status-2nd-client-review { background: #4eccc6; color: #333; }
+    .status-with-reviewer-final { background: #74afcc; }
+    .status-with-client-final-approval { background: #bb3354; }
+    .status-with-c-to-upload { background: #ffcb00; color: #333; }
+    .status-upload-pending { background: #cab641; color: #333; }
+    .status-approved-to-submit { background: #fdab3d; color: #333; }
+    .status-with-client-escalate { background: #faa1f1; color: #333; }
+    .status-pending-aggregator-approval { background: #7f5347; }
+    .status-submitted { background: #00c875; }
+    .status-next-best-offer { background: #df2f4a; }
+    .status-dnp-but-billed { background: #757575; }
+    .status-submission-issue { background: #5559df; }
+    .status-edna-writer-review { background: #bda8f9; color: #333; }
+    .status-unknown { background: #c4c4c4; color: #333; }
+
+    /* Metrics status colors (Monday) */
+    .metrics-asked { background: #ffcb00; color: #333; }
+    .metrics-reviewed { background: #00c875; }
+    .metrics-repurposed { background: #fdab3d; color: #333; }
+    .metrics-provided { background: #9cd326; color: #333; }
+    .metrics-not-required { background: #9d50dd; }
+
+    /* Asset status colors (Monday) */
+    .asset-working { background: #fdab3d; color: #333; }
+    .asset-done { background: #00c875; }
+    .asset-approved { background: #cab641; color: #333; }
+    .asset-edna-review { background: #bb3354; }
+    .asset-briefed { background: #ff007f; }
+    .asset-required { background: #bda8f9; color: #333; }
+    .asset-not-required { background: #175a63; }
+    .asset-following-up { background: #ffadad; color: #333; }
+    .asset-collected { background: #df2f4a; }
+    .asset-final-approval { background: #037f4c; }
+    .asset-client-tagged { background: #ffcb00; color: #333; }
+    .asset-edna-following { background: #401694; }
+    .asset-updates-requested { background: #ff6d3b; }
+
+    /* Multiselect filter */
+    .filter-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+    .filter-select { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; background: white; }
+    .filter-select:focus { outline: none; border-color: #662d91; }
+    .filter-label { font-size: 11px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+    .filter-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+    .filter-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; cursor: pointer; user-select: none; transition: all 0.15s; }
+    .filter-chip.urgent { background: #fde8e8; color: #c62828; border: 1.5px solid #f5c6c6; }
+    .filter-chip.urgent:hover { background: #f9d0d0; }
+    .filter-chip.urgent.active { background: #c62828; color: white; border-color: #c62828; }
+    .filter-chip.monitor { background: #e6f9ee; color: #0a7c3e; border: 1.5px solid #b8e6c8; }
+    .filter-chip.monitor:hover { background: #ccf0d8; }
+    .filter-chip.monitor.active { background: #0a7c3e; color: white; border-color: #0a7c3e; }
+
+    /* Detail popup card */
+    .detail-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.3); z-index: 200; }
+    .detail-overlay.open { display: flex; align-items: center; justify-content: center; }
+    .detail-card { background: white; border-radius: 12px; padding: 24px; width: 520px; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+    .detail-card h3 { font-size: 16px; font-weight: 700; color: #1a1a2e; margin-bottom: 16px; line-height: 1.3; }
+    .detail-card .detail-grid { display: grid; grid-template-columns: 120px 1fr; gap: 8px 12px; font-size: 13px; }
+    .detail-card .detail-label { color: #888; font-weight: 600; }
+    .detail-card .detail-value { color: #333; }
+    .detail-card .detail-section { margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee; }
+    .detail-card .detail-section h4 { font-size: 12px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .detail-card .detail-alerts { display: flex; flex-wrap: wrap; gap: 6px; }
+    .detail-card .detail-close { position: absolute; top: 16px; right: 20px; background: none; border: none; font-size: 20px; cursor: pointer; color: #888; }
+    .detail-card .detail-close:hover { color: #333; }
+    .detail-card .btn-monday { display: inline-block; margin-top: 16px; padding: 6px 14px; background: #662d91; color: white; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: 600; }
+    .detail-card .btn-monday:hover { background: #7b3aab; }
+
+    /* Summary stats */
+    .stats-grid { display: flex; gap: 16px; flex-wrap: wrap; }
+    .summary-tables { display: flex; gap: 20px; margin-top: 16px; flex-wrap: wrap; }
+    .summary-table { flex: 1; min-width: 240px; }
+    .summary-table h4 { font-size: 13px; font-weight: 700; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .summary-table table { width: 100%; }
+    .summary-table td { padding: 6px 10px; font-size: 13px; }
+    .summary-table td:last-child { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .cell-alert.has-alert { color: #c62828; }
+
+    .all-clear { text-align: center; padding: 24px; color: #0a7c3e; font-weight: 600; }
+
+    /* Chat panel */
+    .chat-header { padding: 12px 16px; border-bottom: 1px solid #e9ecef; font-size: 14px; font-weight: 700; color: #1a1a2e; }
+    .chat-messages { flex: 1; overflow-y: auto; padding: 12px 16px; font-size: 13px; line-height: 1.5; color: #333; }
+    .chat-messages .msg { margin-bottom: 12px; }
+    .chat-messages .msg.user { color: #662d91; font-weight: 600; }
+    .chat-messages .msg.assistant { color: #333; line-height: 1.6; }
+    .chat-messages .msg.assistant p { margin: 0 0 8px 0; }
+    .chat-messages .msg.assistant strong { color: #1a1a2e; }
+    .chat-messages .msg.system { color: #888; font-style: italic; font-size: 12px; }
+    .chat-input-area { padding: 12px 16px; border-top: 1px solid #e9ecef; display: flex; gap: 8px; }
+    .chat-input { flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; font-family: inherit; resize: none; }
+    .chat-input:focus { outline: none; border-color: #662d91; }
+    .chat-send { background: #662d91; color: white; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .chat-send:hover { background: #7b3aab; }
+    .chat-send:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+
+<div class="page-header">
+    <h2>Co-ordinator</h2>
+    <div class="header-actions">
+        <span class="sync-status">
+            {% if last_sync %}Last synced: {{ last_sync }}{% else %}Not synced yet{% endif %}
+        </span>
+        <button class="btn-refresh"
+                hx-post="/sync/submissions"
+                hx-target="#manager-content"
+                hx-swap="innerHTML"
+                hx-select="#manager-content"
+                hx-disabled-elt="this">
+            <span class="idle">Refresh from Monday</span>
+            <span class="loading"><span class="spinner"></span> Syncing...</span>
+        </button>
+        <button class="btn-analyse" onclick="runAnalysis()" id="btn-analyse">
+            Analyse
+        </button>
+        <button style="background:none;border:1px solid #ddd;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;color:#888;" onclick="fetch('/api/clear-rules-cache',{method:'POST'}).then(()=>this.textContent='Cleared!').catch(()=>this.textContent='Error')" title="Force re-read of Google Doc rules on next Analyse">
+            Reload Rules
+        </button>
+    </div>
+</div>
+
+{% if sync_result is defined and sync_result %}
+<div class="alert alert-success">
+    Synced {{ sync_result.submissions_synced }} submissions ({{ sync_result.submissions_unchanged }} unchanged) in {{ sync_result.duration_seconds }}s
+    {% if sync_result.errors %}
+    <br><strong>Errors:</strong> {{ sync_result.errors | join(', ') }}
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Detail popup card -->
+<div class="detail-overlay" id="detail-overlay" onclick="if(event.target===this)closeDetail()">
+    <div class="detail-card" id="detail-card" style="position:relative;"></div>
+</div>
+
+<div id="manager-content">
+<div class="manager-layout">
+    <div class="dashboard-panel">
+
+        <!-- Section 1: Alerts -->
+        <div class="section">
+            <div class="section-header collapsed" onclick="toggleSection(this)">
+                <span class="section-chevron">&#9660;</span>
+                <span class="section-title">Alerts</span>
+                <span class="section-count">({{ alerts | length }})</span>
+            </div>
+            <div class="section-body" style="padding: 12px 16px 0; display:none;">
+                {% if alerts | length > 0 %}
+                <div class="filter-row">
+                    <span class="filter-label">Alerts:</span>
+                    <div class="filter-chips" id="alert-chips">
+                        {% set urgent_alerts = ['Target Date Issue (Pre-Review)', 'Target Date Issue (Post-Review)', 'Writer Late', 'Reviewer Late', 'Metric Alert (Urgent)', 'Asset Alert (Urgent)', 'Asset Alert (Post-Review)', 'Metric Alert (Post-Review)'] %}
+                        {% for val in alert_values %}
+                        <span class="filter-chip {% if val in urgent_alerts %}urgent{% else %}monitor{% endif %}"
+                              data-value="{{ val }}" onclick="toggleChip(this)">{{ val }}</span>
+                        {% endfor %}
+                    </div>
+                    <span class="filter-label" style="margin-left:8px;">Status:</span>
+                    <select class="filter-select" id="filter-status" onchange="filterAlerts()">
+                        <option value="">All</option>
+                        {% for status in status_counts.keys() %}
+                        <option value="{{ status }}">{{ status }}</option>
+                        {% endfor %}
+                    </select>
+                    <span class="filter-label">Writer:</span>
+                    <select class="filter-select" id="filter-writer" onchange="filterAlerts()">
+                        <option value="">All</option>
+                        {% for writer in writer_counts.keys() %}
+                        <option value="{{ writer }}">{{ writer }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div style="overflow-x: auto;">
+                <table class="alert-table" id="alert-table">
+                    <thead>
+                        <tr>
+                            <th onclick="sortTable('alert-table', 0)">Name <span class="sort-arrow">&#9650;&#9660;</span></th>
+                            <th>Alerts</th>
+                            <th onclick="sortTable('alert-table', 2)">Award <span class="sort-arrow">&#9650;&#9660;</span></th>
+                            <th onclick="sortTable('alert-table', 3)">Status <span class="sort-arrow">&#9650;&#9660;</span></th>
+                            <th onclick="sortTable('alert-table', 4)">Metrics <span class="sort-arrow">&#9650;&#9660;</span></th>
+                            <th onclick="sortTable('alert-table', 5)">Asset <span class="sort-arrow">&#9650;&#9660;</span></th>
+                            <th onclick="sortTable('alert-table', 6)">Writer <span class="sort-arrow">&#9650;&#9660;</span></th>
+                            <th onclick="sortTable('alert-table', 7)">Target <span class="sort-arrow">&#9650;&#9660;</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in alerts %}
+                        <tr data-alert-values="{{ item.date_alert or '' }}|{{ item.writer_alert or '' }}|{{ item.metrics_alert or '' }}|{{ item.asset_alert or '' }}"
+                            data-status="{{ item.delivery_status or '' }}"
+                            data-writer="{{ item.writer or '' }}"
+                            data-detail='{{ item | tojson }}'>
+                            <td onclick="showDetail(this.parentElement)">{{ item.name }}</td>
+                            <td>
+                                {% if item.date_alert %}<span class="alert-badge date">{{ item.date_alert }}<span class="alert-tooltip">{{ alert_explain(item.date_alert, item) }}</span></span>{% endif %}
+                                {% if item.writer_alert %}<span class="alert-badge writer">{{ item.writer_alert }}<span class="alert-tooltip">{{ alert_explain(item.writer_alert, item) }}</span></span>{% endif %}
+                                {% if item.metrics_alert %}<span class="alert-badge metrics">{{ item.metrics_alert }}<span class="alert-tooltip">{{ alert_explain(item.metrics_alert, item) }}</span></span>{% endif %}
+                                {% if item.asset_alert %}<span class="alert-badge asset">{{ item.asset_alert }}<span class="alert-tooltip">{{ alert_explain(item.asset_alert, item) }}</span></span>{% endif %}
+                                {% if item.escalate %}<span class="alert-badge escalated">Escalated<span class="alert-tooltip">This submission has been manually flagged for escalation.</span></span>{% endif %}
+                            </td>
+                            <td>{{ item.award or '—' }}</td>
+                            <td>{{ status_badge(item.delivery_status) }}</td>
+                            <td>{{ metrics_badge(item.metrics_status) }}</td>
+                            <td>{{ asset_badge(item.asset_status) }}</td>
+                            <td>{{ item.writer or '—' }}</td>
+                            <td>{{ item.target_finish_date or '—' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                </div>
+                {% else %}
+                <div class="all-clear">All clear — no alerts</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Section 2: Pipeline Summary -->
+        <div class="section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <span class="section-chevron">&#9660;</span>
+                <span class="section-title">Pipeline Summary</span>
+                <span class="section-count">({{ active_count }} active)</span>
+            </div>
+            <div class="section-body">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="number">{{ active_count }}</div>
+                        <div class="label">Active submissions</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number">{{ alerts | length }}</div>
+                        <div class="label">Alerts</div>
+                    </div>
+                </div>
+
+                <!-- Stacked bar chart -->
+                <div style="margin-top:16px; background:white; border:1px solid #e9ecef; border-radius:8px; padding:16px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+                        <h4 style="font-size:14px; font-weight:700; color:#1a1a2e; margin:0;">Active Submissions — Delivery Status</h4>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <label style="font-size:11px; color:#888; font-weight:600;">Filter by:</label>
+                            <select id="chart-date-field" onchange="updateChart()" style="padding:3px 6px; border:1px solid #ddd; border-radius:4px; font-size:11px;">
+                                <option value="close_date">Close Date</option>
+                                <option value="target_finish_date">Target Date</option>
+                            </select>
+                            <select id="chart-months" onchange="updateChart()" style="padding:3px 6px; border:1px solid #ddd; border-radius:4px; font-size:11px;">
+                                <option value="0">All</option>
+                                <option value="1">Next 1 month</option>
+                                <option value="2" selected>Next 2 months</option>
+                                <option value="3">Next 3 months</option>
+                                <option value="6">Next 6 months</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="height:300px;">
+                        <canvas id="status-chart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Charts grid -->
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px;">
+
+                    <!-- Chart: By Award (horizontal bar, stacked by delivery status) -->
+                    <div style="background:white; border:1px solid #e9ecef; border-radius:8px; padding:16px;">
+                        <h4 style="font-size:13px; font-weight:700; color:#1a1a2e; margin:0 0 12px;">Submissions by Award</h4>
+                        <div style="height:300px;"><canvas id="chart-by-award"></canvas></div>
+                    </div>
+
+                    <!-- Chart: By Writer (horizontal bar, stacked by delivery status) -->
+                    <div style="background:white; border:1px solid #e9ecef; border-radius:8px; padding:16px;">
+                        <h4 style="font-size:13px; font-weight:700; color:#1a1a2e; margin:0 0 12px;">Submissions by Writer</h4>
+                        <div style="height:300px;"><canvas id="chart-by-writer"></canvas></div>
+                    </div>
+
+                    <!-- Chart: Days Since for "With Client" items (horizontal bar, stacked by client) -->
+                    <div style="background:white; border:1px solid #e9ecef; border-radius:8px; padding:16px;">
+                        <h4 style="font-size:13px; font-weight:700; color:#1a1a2e; margin:0 0 12px;">Days Since — With Client</h4>
+                        <div style="height:300px;"><canvas id="chart-days-since"></canvas></div>
+                    </div>
+
+                    <!-- Chart: Delivery Status x Metrics Status (vertical bar, stacked) -->
+                    <div style="background:white; border:1px solid #e9ecef; border-radius:8px; padding:16px;">
+                        <h4 style="font-size:13px; font-weight:700; color:#1a1a2e; margin:0 0 12px;">Metrics Status by Delivery Status</h4>
+                        <div style="height:300px;"><canvas id="chart-metrics"></canvas></div>
+                    </div>
+
+                    <!-- Chart: Delivery Status x Asset Status (vertical bar, stacked) -->
+                    <div style="background:white; border:1px solid #e9ecef; border-radius:8px; padding:16px; grid-column: 1 / -1;">
+                        <h4 style="font-size:13px; font-weight:700; color:#1a1a2e; margin:0 0 12px;">Asset Status by Delivery Status</h4>
+                        <div style="height:300px;"><canvas id="chart-assets"></canvas></div>
+                    </div>
+                </div>
+
+                <div class="summary-tables">
+                    <div class="summary-table">
+                        <h4>Delivery Status</h4>
+                        <table>
+                            <tbody>
+                                {% for status, count in status_counts.items() %}
+                                <tr>
+                                    <td>{{ status_badge(status) }}</td>
+                                    <td>{{ count }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="summary-table">
+                        <h4>Writer Workload</h4>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left; font-size:11px; color:#888;">Writer</th>
+                                    <th style="text-align:right; font-size:11px; color:#888;">Active</th>
+                                    <th style="text-align:right; font-size:11px; color:#888;">Alerts</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for writer, counts in writer_counts.items() %}
+                                <tr>
+                                    <td>{{ writer }}</td>
+                                    <td>{{ counts.active }}</td>
+                                    <td class="{% if counts.alerts > 0 %}cell-alert has-alert{% endif %}">{{ counts.alerts }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Chat Panel -->
+    <div class="chat-panel">
+        <div class="chat-header">AI Assistant</div>
+        <div class="chat-messages" id="chat-messages">
+            <div class="msg system">Click "Analyse" to get AI-powered insights, or ask a question below.</div>
+        </div>
+        <div class="chat-input-area">
+            <textarea class="chat-input" id="chat-input" rows="2" placeholder="Ask me about the pipeline..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea>
+            <button class="chat-send" onclick="sendChat()" id="chat-send">Send</button>
+        </div>
+    </div>
+</div>
+</div>
+
+<script>
+function toggleSection(header) {
+    header.classList.toggle('collapsed');
+    const body = header.nextElementSibling;
+    if (body) body.style.display = header.classList.contains('collapsed') ? 'none' : '';
+}
+
+let sortState = {};
+function sortTable(tableId, colIndex) {
+    const table = document.getElementById(tableId);
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const key = tableId + '-' + colIndex;
+    const asc = sortState[key] !== 'asc';
+    sortState[key] = asc ? 'asc' : 'desc';
+    rows.sort((a, b) => {
+        const aVal = a.cells[colIndex].textContent.trim();
+        const bVal = b.cells[colIndex].textContent.trim();
+        if (aVal === '—' && bVal !== '—') return 1;
+        if (bVal === '—' && aVal !== '—') return -1;
+        return asc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    });
+    rows.forEach(r => tbody.appendChild(r));
+}
+
+// Multiselect chip filter
+function toggleChip(chip) {
+    chip.classList.toggle('active');
+    filterAlerts();
+}
+
+function filterAlerts() {
+    const activeChips = Array.from(document.querySelectorAll('#alert-chips .filter-chip.active'))
+        .map(c => c.dataset.value);
+    const status = document.getElementById('filter-status').value;
+    const writer = document.getElementById('filter-writer').value;
+    const rows = document.querySelectorAll('#alert-table tbody tr');
+    rows.forEach(row => {
+        let show = true;
+        if (activeChips.length > 0) {
+            const rowAlerts = row.dataset.alertValues;
+            show = activeChips.some(chip => rowAlerts.includes(chip));
+        }
+        if (status && row.dataset.status !== status) show = false;
+        if (writer && row.dataset.writer !== writer) show = false;
+        row.style.display = show ? '' : 'none';
+    });
+}
+
+// Detail popup card
+function showDetail(tr) {
+    const data = JSON.parse(tr.dataset.detail);
+    const card = document.getElementById('detail-card');
+    card.innerHTML = `
+        <button class="detail-close" onclick="closeDetail()">&times;</button>
+        <h3>${data.name}</h3>
+        <div class="detail-grid">
+            <span class="detail-label">Award</span><span class="detail-value">${data.award || '—'}</span>
+            <span class="detail-label">Company</span><span class="detail-value">${data.company || '—'}</span>
+            <span class="detail-label">Category</span><span class="detail-value">${data.category || '—'}</span>
+            <span class="detail-label">Delivery Status</span><span class="detail-value">${data.delivery_status || '—'}</span>
+            <span class="detail-label">Writer</span><span class="detail-value">${data.writer || '—'}</span>
+            <span class="detail-label">Reviewer</span><span class="detail-value">${data.reviewer || '—'}</span>
+            <span class="detail-label">Writer Due</span><span class="detail-value">${data.writer_due || '—'}</span>
+            <span class="detail-label">Reviewer Due</span><span class="detail-value">${data.reviewer_due || '—'}</span>
+            <span class="detail-label">Close Date</span><span class="detail-value">${data.close_date || '—'}</span>
+            <span class="detail-label">Extension Date</span><span class="detail-value">${data.extension_date || '—'}</span>
+            <span class="detail-label">Target Finish</span><span class="detail-value">${data.target_finish_date || '—'}</span>
+            <span class="detail-label">Days Since</span><span class="detail-value">${data.days_since || '—'}</span>
+            <span class="detail-label">Contingency</span><span class="detail-value">${data.contingency_days || '—'}</span>
+            <span class="detail-label">Spare Days Est.</span><span class="detail-value">${data.spare_days_est || '—'}</span>
+            <span class="detail-label">Metrics Status</span><span class="detail-value">${data.metrics_status || '—'}</span>
+            <span class="detail-label">Asset Status</span><span class="detail-value">${data.asset_status || '—'}</span>
+            <span class="detail-label">Asset Days</span><span class="detail-value">${data.asset_days_since || '—'}</span>
+        </div>
+        ${(data.date_alert || data.writer_alert || data.metrics_alert || data.asset_alert) ? `
+        <div class="detail-section">
+            <h4>Active Alerts</h4>
+            <div class="detail-alerts">
+                ${data.date_alert ? `<span class="alert-badge date">${data.date_alert}</span>` : ''}
+                ${data.writer_alert ? `<span class="alert-badge writer">${data.writer_alert}</span>` : ''}
+                ${data.metrics_alert ? `<span class="alert-badge metrics">${data.metrics_alert}</span>` : ''}
+                ${data.asset_alert ? `<span class="alert-badge asset">${data.asset_alert}</span>` : ''}
+            </div>
+        </div>` : ''}
+        <a class="btn-monday" href="https://reputationbydesign.monday.com/boards/1901925100/pulses/${data.monday_id}" target="_blank" rel="noopener">Open in Monday &#8599;</a>
+    `;
+    document.getElementById('detail-overlay').classList.add('open');
+}
+
+function closeDetail() {
+    document.getElementById('detail-overlay').classList.remove('open');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
+
+function formatAnalysis(summary, patterns) {
+    // Split into lines and build structured HTML
+    const lines = summary.split('\n');
+    let html = '';
+    let inList = false;
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            if (inList) { html += '</ul>'; inList = false; }
+            continue;
+        }
+
+        // Bold headings
+        if (trimmed.startsWith('**') && trimmed.endsWith('**')) {
+            if (inList) { html += '</ul>'; inList = false; }
+            const heading = trimmed.replace(/\*\*/g, '');
+            html += `<div style="margin-top:14px;margin-bottom:6px;font-weight:700;color:#1a1a2e;font-size:13px;border-bottom:1px solid #eee;padding-bottom:4px;">${heading}</div>`;
+            continue;
+        }
+
+        // Numbered items
+        const numMatch = trimmed.match(/^(\d+)\.\s+(.+)/);
+        if (numMatch) {
+            if (inList) { html += '</ul>'; inList = false; }
+            const content = numMatch[2].replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            html += `<div style="margin:4px 0 4px 4px;font-size:12px;line-height:1.5;"><span style="font-weight:700;color:#662d91;margin-right:6px;">${numMatch[1]}.</span>${content}</div>`;
+            continue;
+        }
+
+        // Bullet items
+        if (trimmed.startsWith('- ') || trimmed.startsWith('• ')) {
+            if (!inList) { html += '<ul style="margin:4px 0 4px 16px;padding:0;font-size:12px;line-height:1.6;">'; inList = true; }
+            const content = trimmed.slice(2).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            html += `<li style="margin:2px 0;">${content}</li>`;
+            continue;
+        }
+
+        // Regular text
+        if (inList) { html += '</ul>'; inList = false; }
+        const content = trimmed.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        html += `<p style="margin:4px 0;font-size:12px;line-height:1.5;">${content}</p>`;
+    }
+    if (inList) html += '</ul>';
+
+    if (patterns && patterns.length > 0) {
+        html += '<div style="margin-top:12px;padding:8px 10px;background:#f8f4ff;border-radius:6px;font-size:11px;">';
+        html += '<strong style="color:#662d91;">Patterns:</strong>';
+        html += '<ul style="margin:4px 0 0 16px;padding:0;">';
+        html += patterns.map(p => `<li style="margin:2px 0;">${p}</li>`).join('');
+        html += '</ul></div>';
+    }
+    return html;
+}
+
+function addMessage(role, text) {
+    const messages = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = 'msg ' + role;
+    div.textContent = text;
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+    return div;
+}
+
+function runAnalysis() {
+    const btn = document.getElementById('btn-analyse');
+    btn.disabled = true;
+    btn.textContent = 'Analysing...';
+    const alertCount = document.querySelectorAll('#alert-table tbody tr').length;
+    addMessage('system', `Reading ${alertCount} active alerts from the dashboard...`);
+    setTimeout(() => addMessage('system', 'Loading management rules from Google Doc...'), 1500);
+    setTimeout(() => {
+        const waitMsg = addMessage('system', 'Sending to Claude for analysis — reviewing writer capacity, deadline clustering, and lifecycle context...');
+        // Add animated dots to show it's still working
+        let dots = 0;
+        window._analysisDots = setInterval(() => {
+            dots = (dots + 1) % 4;
+            waitMsg.textContent = 'Claude is thinking' + '.'.repeat(dots + 1) + ' (this can take up to a minute)';
+        }, 2000);
+    }, 3000);
+    fetch('/api/analyse', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (window._analysisDots) clearInterval(window._analysisDots);
+            btn.disabled = false;
+            btn.textContent = 'Analyse';
+            if (data.error) { addMessage('system', 'Error: ' + data.error); return; }
+            addMessage('system', `Analysis complete — ${data.insight_count || 0} items reviewed.`);
+            if (data.summary) {
+                const summaryDiv = addMessage('assistant', '');
+                summaryDiv.innerHTML = formatAnalysis(data.summary, data.patterns);
+            }
+        })
+        .catch(err => { if (window._analysisDots) clearInterval(window._analysisDots); btn.disabled = false; btn.textContent = 'Analyse'; addMessage('system', 'Error: ' + err.message); });
+}
+
+function sendChat() {
+    const input = document.getElementById('chat-input');
+    const message = input.value.trim();
+    if (!message) return;
+    input.value = '';
+    addMessage('user', message);
+    const sendBtn = document.getElementById('chat-send');
+    sendBtn.disabled = true;
+    const responseDiv = addMessage('assistant', '');
+    fetch('/api/chat', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ message }) })
+    .then(response => {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        function readStream() {
+            return reader.read().then(({ done, value }) => {
+                if (done) { sendBtn.disabled = false; return; }
+                const text = decoder.decode(value, { stream: true });
+                for (const line of text.split('\n')) {
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6);
+                        if (data === '[DONE]') { sendBtn.disabled = false; return; }
+                        try { const p = JSON.parse(data); if (p.text) responseDiv.textContent += p.text; }
+                        catch { if (data.trim()) responseDiv.textContent += data; }
+                    }
+                }
+                document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
+                return readStream();
+            });
+        }
+        return readStream();
+    })
+    .catch(err => { sendBtn.disabled = false; responseDiv.textContent = 'Error: ' + err.message; });
+}
+
+// -- Stacked bar chart -------------------------------------------------------
+const STATUS_ORDER = {{ chart_statuses | tojson }};
+const AWARD_COLORS = [
+    "#ffcb00", "#007eb5", "#00c875", "#bb3354", "#579bfc",
+    "#ff6d3b", "#7e3b8a", "#fdab3d", "#9cd326", "#66ccff",
+    "#784bd1", "#4eccc6", "#ff5ac4", "#a9bee8", "#037f4c",
+    "#df2f4a", "#cab641", "#bda8f9", "#ff007f", "#175a63",
+];
+const ALL_ITEMS = {{ chart_items_json | safe }};
+let statusChart = null;
+
+function buildChartData(items) {
+    const statusMap = {};
+    const awardSet = new Set();
+    const awardTotals = {};
+
+    for (const item of items) {
+        const status = item.delivery_status || 'Unknown';
+        const award = item.award || 'Unknown';
+        if (!statusMap[status]) statusMap[status] = {};
+        statusMap[status][award] = (statusMap[status][award] || 0) + 1;
+        awardSet.add(award);
+        awardTotals[award] = (awardTotals[award] || 0) + 1;
+    }
+
+    // Sort statuses by lifecycle order
+    const statuses = Object.keys(statusMap).sort((a, b) => {
+        const ai = STATUS_ORDER.indexOf(a);
+        const bi = STATUS_ORDER.indexOf(b);
+        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+
+    // Sort awards by frequency
+    const awards = Array.from(awardSet).sort((a, b) => (awardTotals[b] || 0) - (awardTotals[a] || 0));
+
+    const datasets = awards.map((award, i) => ({
+        label: award,
+        data: statuses.map(s => (statusMap[s] || {})[award] || 0),
+        backgroundColor: AWARD_COLORS[i % AWARD_COLORS.length],
+    }));
+
+    return { labels: statuses, datasets };
+}
+
+function updateChart() {
+    const dateField = document.getElementById('chart-date-field').value;
+    const months = parseInt(document.getElementById('chart-months').value);
+
+    let filtered = ALL_ITEMS;
+    if (months > 0) {
+        const cutoff = new Date();
+        cutoff.setMonth(cutoff.getMonth() + months);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        filtered = ALL_ITEMS.filter(item => {
+            const d = item[dateField];
+            return d && d <= cutoffStr;
+        });
+    }
+
+    const { labels, datasets } = buildChartData(filtered);
+
+    // Update title
+    const titleEl = document.querySelector('#status-chart').closest('div[style]').parentElement.querySelector('h4');
+    const monthLabel = months > 0 ? ` (Next ${months} Month${months > 1 ? 's' : ''})` : '';
+    const fieldLabel = dateField === 'close_date' ? 'Close Date' : 'Target Date';
+    titleEl.textContent = `Active Submissions — Delivery Status${months > 0 ? ' — ' + fieldLabel + monthLabel : ''}`;
+
+    if (statusChart) {
+        statusChart.data.labels = labels;
+        statusChart.data.datasets = datasets;
+        statusChart.update();
+    }
+}
+
+function initChart() {
+    const ctx = document.getElementById('status-chart');
+    if (!ctx) return;
+
+    const { labels, datasets } = buildChartData(ALL_ITEMS.filter(item => {
+        // Default: next 2 months by close date
+        const cutoff = new Date();
+        cutoff.setMonth(cutoff.getMonth() + 2);
+        const d = item.close_date;
+        return d && d <= cutoff.toISOString().slice(0, 10);
+    }));
+
+    statusChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: { font: { size: 10 }, boxWidth: 12, padding: 8 }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ctx.dataset.label + ': ' + ctx.raw
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    ticks: { font: { size: 10 }, maxRotation: 45 }
+                },
+                y: {
+                    stacked: true,
+                    beginAtZero: true,
+                    ticks: { stepSize: 1, font: { size: 10 } },
+                    title: { display: true, text: 'Count', font: { size: 11 } }
+                }
+            }
+        }
+    });
+}
+initChart();
+
+// -- Delivery status colors for stacking ------------------------------------
+const STATUS_COLORS = {
+    'Awaiting To Open': '#a9bee8', 'Delivery Setup': '#784bd1',
+    'Confirm Hours': '#ff6d3b', 'Writer Briefed': '#579bfc',
+    'With Writer': '#007eb5', 'With Velma': '#7e3b8a',
+    'With Reviewer': '#66ccff', 'Ready & Hold': '#037f4c',
+    'REVIEWED-NEW Link': '#ff5ac4', 'With Client': '#9cd326',
+    '2nd Writer Review': '#a1e3f6', '2nd Client Review': '#4eccc6',
+    'With Reviewer - FINAL': '#74afcc', 'With Client for Final Approval': '#bb3354',
+    'With C to Upload': '#ffcb00', 'Upload Pending': '#cab641',
+    'Approved to Submit': '#fdab3d', 'With Client - ESCALATE': '#faa1f1',
+    'Pending Aggregator Approval': '#7f5347',
+};
+const METRICS_COLORS = {
+    'Asked Client': '#ffcb00', 'Reviewed': '#00c875', 'Repurposed': '#fdab3d',
+    'Client Provided': '#9cd326', 'Not Required': '#9d50dd',
+};
+const ASSET_COLORS = {
+    'Working on it': '#fdab3d', 'Done': '#00c875', 'Approved': '#cab641',
+    'For Edna Review': '#bb3354', 'Briefed': '#ff007f', 'Required': '#bda8f9',
+    'Not Required': '#175a63', 'Following-up Client': '#ffadad',
+    'Collected Previous': '#df2f4a', 'For  Final Approval': '#037f4c',
+    'Client Tagged': '#ffcb00', "Edna'd and following up": '#401694',
+    'Updates Requested': '#ff6d3b',
+};
+
+function buildStackedData(items, groupByField, stackByField, colorMap, sortGroupBy) {
+    const groups = {};
+    const stackSet = new Set();
+    for (const item of items) {
+        const group = item[groupByField] || 'Unknown';
+        const stack = item[stackByField] || 'Unknown';
+        if (!groups[group]) groups[group] = {};
+        groups[group][stack] = (groups[group][stack] || 0) + 1;
+        stackSet.add(stack);
+    }
+
+    let labels;
+    if (sortGroupBy === 'status') {
+        labels = Object.keys(groups).sort((a, b) => {
+            const ai = STATUS_ORDER.indexOf(a); const bi = STATUS_ORDER.indexOf(b);
+            return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+        });
+    } else if (sortGroupBy === 'count') {
+        labels = Object.keys(groups).sort((a, b) => {
+            const ta = Object.values(groups[a]).reduce((s, v) => s + v, 0);
+            const tb = Object.values(groups[b]).reduce((s, v) => s + v, 0);
+            return tb - ta;
+        });
+    } else {
+        labels = Object.keys(groups).sort();
+    }
+
+    // Sort stacks by frequency
+    const stackTotals = {};
+    for (const s of stackSet) { stackTotals[s] = 0; }
+    for (const g of Object.values(groups)) { for (const [s, c] of Object.entries(g)) { stackTotals[s] += c; } }
+    const stacks = Array.from(stackSet).sort((a, b) => (stackTotals[b] || 0) - (stackTotals[a] || 0));
+
+    const fallbackColors = AWARD_COLORS;
+    const datasets = stacks.map((stack, i) => ({
+        label: stack,
+        data: labels.map(l => (groups[l] || {})[stack] || 0),
+        backgroundColor: (colorMap && colorMap[stack]) || fallbackColors[i % fallbackColors.length],
+    }));
+
+    return { labels, datasets };
+}
+
+function makeChart(canvasId, type, items, groupBy, stackBy, colorMap, sortBy) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    const { labels, datasets } = buildStackedData(items, groupBy, stackBy, colorMap, sortBy);
+    const isHorizontal = type === 'horizontal';
+    return new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+            indexAxis: isHorizontal ? 'y' : 'x',
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { font: { size: 9 }, boxWidth: 10, padding: 6 } },
+                tooltip: { callbacks: { label: c => c.dataset.label + ': ' + c.raw } },
+            },
+            scales: {
+                x: { stacked: true, ticks: { font: { size: 10 }, maxRotation: 45 }, beginAtZero: true },
+                y: { stacked: true, ticks: { font: { size: 10 } }, beginAtZero: true },
+            }
+        }
+    });
+}
+
+// Filter items by date for charts (reuse main filter)
+function getFilteredItems() {
+    const dateField = document.getElementById('chart-date-field').value;
+    const months = parseInt(document.getElementById('chart-months').value);
+    if (months === 0) return ALL_ITEMS;
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() + months);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    return ALL_ITEMS.filter(item => { const d = item[dateField]; return d && d <= cutoffStr; });
+}
+
+// -- Shared click handler for all charts --
+function attachChartClick(canvasId, chart, groupField, stackField) {
+    if (!chart) return;
+    document.getElementById(canvasId).style.cursor = 'pointer';
+    document.getElementById(canvasId).onclick = function(evt) {
+        const points = chart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
+        if (!points.length) return;
+        const point = points[0];
+        const groupValue = chart.data.labels[point.index];
+        const stackValue = chart.data.datasets[point.datasetIndex].label;
+
+        const items = getFilteredItems().filter(i =>
+            (i[groupField] || 'Unknown') === groupValue &&
+            (i[stackField] || 'Unknown') === stackValue
+        );
+        if (!items.length) return;
+        showChartPopup(groupValue, stackValue, items);
+    };
+}
+
+function showChartPopup(groupValue, stackValue, items) {
+    const card = document.getElementById('detail-card');
+    let rows = items.map(i =>
+        `<tr>
+            <td style="font-size:12px;padding:4px 8px;">${i.name || '—'}</td>
+            <td style="font-size:12px;padding:4px 8px;">${i.award || '—'}</td>
+            <td style="font-size:12px;padding:4px 8px;">${i.category || '—'}</td>
+            <td style="font-size:12px;padding:4px 8px;">${i.writer || '—'}</td>
+            <td style="font-size:12px;padding:4px 8px;">${i.close_date || '—'}</td>
+            <td style="font-size:12px;padding:4px 8px;">${i.target_finish_date || '—'}</td>
+        </tr>`
+    ).join('');
+
+    card.innerHTML = `
+        <button class="detail-close" onclick="closeDetail()">&times;</button>
+        <h3>${groupValue} — ${stackValue}</h3>
+        <p style="font-size:13px;color:#666;margin-bottom:12px;">${items.length} submission${items.length > 1 ? 's' : ''}</p>
+        <table style="width:100%;border-collapse:collapse;">
+            <thead>
+                <tr style="border-bottom:2px solid #eee;">
+                    <th style="text-align:left;font-size:11px;color:#888;padding:4px 8px;">Name</th>
+                    <th style="text-align:left;font-size:11px;color:#888;padding:4px 8px;">Award</th>
+                    <th style="text-align:left;font-size:11px;color:#888;padding:4px 8px;">Category</th>
+                    <th style="text-align:left;font-size:11px;color:#888;padding:4px 8px;">Writer</th>
+                    <th style="text-align:left;font-size:11px;color:#888;padding:4px 8px;">Close</th>
+                    <th style="text-align:left;font-size:11px;color:#888;padding:4px 8px;">Target</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+    `;
+    document.getElementById('detail-overlay').classList.add('open');
+}
+
+// 1. By Award — horizontal bar, stacked by delivery status (clickable)
+const awardChart = makeChart('chart-by-award', 'horizontal', getFilteredItems(), 'award', 'delivery_status', STATUS_COLORS, 'count');
+attachChartClick('chart-by-award', awardChart, 'award', 'delivery_status');
+
+// 2. By Writer — horizontal bar, stacked by delivery status (clickable)
+const writerChart = makeChart('chart-by-writer', 'horizontal', getFilteredItems(), 'writer', 'delivery_status', STATUS_COLORS, 'count');
+attachChartClick('chart-by-writer', writerChart, 'writer', 'delivery_status');
+
+// 3. Days Since for "With Client" items — horizontal bar, days_since on Y axis, stacked by client
+(function() {
+    const ctx = document.getElementById('chart-days-since');
+    if (!ctx) return;
+    const clientItems = getFilteredItems().filter(i =>
+        i.delivery_status && i.delivery_status.toLowerCase().includes('with client')
+    ).filter(i => i.days_since && parseInt(i.days_since) > 0);
+
+    // Group by days_since value, stacked by company
+    const daysBuckets = {};
+    const companySet = new Set();
+    for (const item of clientItems) {
+        const days = parseInt(item.days_since);
+        const company = item.company || 'Unknown';
+        if (!daysBuckets[days]) daysBuckets[days] = {};
+        daysBuckets[days][company] = (daysBuckets[days][company] || 0) + 1;
+        companySet.add(company);
+    }
+
+    // Sort days descending
+    const labels = Object.keys(daysBuckets).map(Number).sort((a, b) => b - a).map(String);
+    const companies = Array.from(companySet);
+    // Sort companies by total count
+    const companyTotals = {};
+    for (const c of companies) { companyTotals[c] = 0; }
+    for (const bucket of Object.values(daysBuckets)) {
+        for (const [c, count] of Object.entries(bucket)) { companyTotals[c] += count; }
+    }
+    companies.sort((a, b) => (companyTotals[b] || 0) - (companyTotals[a] || 0));
+
+    const datasets = companies.map((company, i) => ({
+        label: company,
+        data: labels.map(d => (daysBuckets[parseInt(d)] || {})[company] || 0),
+        backgroundColor: AWARD_COLORS[i % AWARD_COLORS.length],
+    }));
+
+    const daysSinceChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: labels.map(d => d + ' days'), datasets },
+        options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { font: { size: 9 }, boxWidth: 10, padding: 6 } },
+                tooltip: { callbacks: { label: c => c.dataset.label + ': ' + c.raw } },
+            },
+            scales: {
+                x: { stacked: true, beginAtZero: true, ticks: { font: { size: 10 }, stepSize: 1 }, title: { display: true, text: 'Count', font: { size: 10 } } },
+                y: { stacked: true, ticks: { font: { size: 10 } } },
+            }
+        }
+    });
+
+    // Click handler for days-since chart
+    ctx.style.cursor = 'pointer';
+    ctx.onclick = function(evt) {
+        const points = daysSinceChart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
+        if (!points.length) return;
+        const point = points[0];
+        const daysLabel = daysSinceChart.data.labels[point.index];
+        const company = daysSinceChart.data.datasets[point.datasetIndex].label;
+        const daysVal = parseInt(daysLabel);
+
+        const items = clientItems.filter(i =>
+            parseInt(i.days_since) === daysVal && (i.company || 'Unknown') === company
+        );
+        if (!items.length) return;
+        showChartPopup(daysLabel, company, items);
+    };
+})();
+
+// 4. Metrics Status by Delivery Status — vertical bar, stacked (clickable)
+const metricsChart = makeChart('chart-metrics', 'vertical', getFilteredItems().filter(i => i.metrics_status), 'delivery_status', 'metrics_status', METRICS_COLORS, 'status');
+attachChartClick('chart-metrics', metricsChart, 'delivery_status', 'metrics_status');
+
+// 5. Asset Status by Delivery Status — vertical bar, stacked (clickable)
+const assetsChart = makeChart('chart-assets', 'vertical', getFilteredItems().filter(i => i.asset_status), 'delivery_status', 'asset_status', ASSET_COLORS, 'status');
+attachChartClick('chart-assets', assetsChart, 'delivery_status', 'asset_status');
+</script>
+{% endblock %}

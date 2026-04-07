@@ -179,6 +179,7 @@
                             <button class="btn-judge"
                                     data-name="{{ item.name | e }}"
                                     data-monday-id="{{ item.monday_id }}"
+                                    data-award="{{ item.award | e if item.award else '' }}"
                                     onclick="launchJudge(this)">Judge</button>
                             {% endif %}
                         </td>
@@ -298,6 +299,7 @@ function launchJudge(btn) {
             monday_id: btn.dataset.mondayId,
             name: btn.dataset.name,
             guideline: guideline,
+            award: btn.dataset.award || '',
         })
     })
     .then(r => r.json())

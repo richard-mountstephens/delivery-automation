@@ -366,13 +366,15 @@ async def launch_judging(request: Request):
     data = await request.json()
     name = data.get("name", "")
     guideline = data.get("guideline", "s")
+    award = data.get("award", "")
 
     if not name:
         return JSONResponse({"error": "Name is required"}, status_code=400)
 
     # Escape single quotes in the name for shell safety
     safe_name = name.replace("'", "'\\''")
-    cmd = f"edna judge -g {guideline} '{safe_name}'"
+    award_flag = f" --award '{award.replace(chr(39), chr(39) + chr(92) + chr(39) + chr(39))}'" if award else ""
+    cmd = f"edna judge -g {guideline}{award_flag} '{safe_name}'"
 
     osascript = f'''tell application "Terminal"
   activate

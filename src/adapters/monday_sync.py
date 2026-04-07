@@ -91,6 +91,51 @@ def sync_submissions(db_path: str | Path, settings: dict | None = None) -> SyncR
     )
 
 
+def sync_monday_quick(db_path: str | Path, settings: dict | None = None) -> SyncResult:
+    """Fast sync: only fetch Active group from Edna tracker. Skip submissions."""
+    start = time.monotonic()
+    errors: list[str] = []
+
+    if settings is None:
+        settings = load_settings()
+
+    token = get_monday_token()
+    adapter = MondayAdapter(settings=settings, api_token=token)
+    conn = get_db(db_path)
+
+    edna_synced = 0
+    edna_unchanged = 0
+
+    print("Quick sync: Edna tracker (Active only)...")
+    try:
+        items = adapter.get_edna_items(groups=["Active"])
+        edna_synced, edna_unchanged = _warm_upsert(
+            conn, items, "cache_edna_items", bulk_upsert_edna_items, "edna items",
+        )
+    except Exception as exc:
+        msg = f"Edna tracker quick sync failed: {exc}"
+        print(f"  ERROR: {msg}")
+        errors.append(msg)
+
+    try:
+        set_sync_meta(conn, "last_sync", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    except Exception as exc:
+        errors.append(f"Failed to update cache_meta: {exc}")
+
+    conn.close()
+    duration = time.monotonic() - start
+    print(f"Quick sync done: {edna_synced} edna in {duration:.1f}s")
+
+    return SyncResult(
+        edna_synced=edna_synced,
+        edna_unchanged=edna_unchanged,
+        submissions_synced=0,
+        submissions_unchanged=0,
+        duration_seconds=round(duration, 2),
+        errors=errors,
+    )
+
+
 def sync_monday(db_path: str | Path, settings: dict | None = None) -> SyncResult:
     """Run a sync from Monday.com into the local SQLite cache."""
     start = time.monotonic()

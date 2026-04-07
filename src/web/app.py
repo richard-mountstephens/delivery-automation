@@ -64,6 +64,61 @@ def _grouped_edna_items() -> tuple[dict[str, list[dict]], str | None]:
     return ordered, last_sync
 
 
+def _judging_stats(groups: dict[str, list[dict]]) -> dict:
+    """Compute summary table data from reviewed Edna items."""
+    reviewed = [
+        item for items in groups.values() for item in items
+        if item.get("edna_status") == "Edna Reviewed"
+        and item.get("triage_score") is not None
+    ]
+    if not reviewed:
+        return {"total_reviewed": 0, "by_award": [], "by_writer": []}
+
+    # By award: avg score, count, top writer
+    scores_by_award: dict[str, list[float]] = defaultdict(list)
+    award_writers: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for item in reviewed:
+        award = item.get("award") or "Unknown"
+        writer = item.get("writer") or "Unknown"
+        scores_by_award[award].append(item["triage_score"])
+        award_writers[award][writer] += 1
+
+    by_award = []
+    for award, scores in scores_by_award.items():
+        top_writer, top_count = max(award_writers[award].items(), key=lambda x: x[1])
+        by_award.append({
+            "award": award,
+            "avg_score": round(sum(scores) / len(scores), 1),
+            "count": len(scores),
+            "top_writer": top_writer,
+            "top_writer_count": top_count,
+        })
+    by_award.sort(key=lambda x: x["count"], reverse=True)
+
+    # By writer: avg score, count, top award
+    scores_by_writer: dict[str, list[float]] = defaultdict(list)
+    writer_awards: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for item in reviewed:
+        writer = item.get("writer") or "Unknown"
+        award = item.get("award") or "Unknown"
+        scores_by_writer[writer].append(item["triage_score"])
+        writer_awards[writer][award] += 1
+
+    by_writer = []
+    for writer, scores in scores_by_writer.items():
+        top_award, top_count = max(writer_awards[writer].items(), key=lambda x: x[1])
+        by_writer.append({
+            "writer": writer,
+            "avg_score": round(sum(scores) / len(scores), 1),
+            "count": len(scores),
+            "top_award": top_award,
+            "top_award_count": top_count,
+        })
+    by_writer.sort(key=lambda x: x["count"], reverse=True)
+
+    return {"total_reviewed": len(reviewed), "by_award": by_award, "by_writer": by_writer}
+
+
 FINISHED_STATUSES = {"Submitted", "Next Best Offer", "DNP But Billed"}
 EXCLUDED_STATUSES = {"Prospect", "Did Not Proceed"}
 ACTIVE_GROUPS = {"Active", "Future"}
@@ -214,6 +269,7 @@ def _manager_data() -> dict:
                 "close_date": i.get("close_date"),
                 "target_finish_date": i.get("target_finish_date"),
                 "days_since": i.get("days_since"),
+                "date_alert": i.get("date_alert"),
                 "metrics_status": i.get("metrics_status"),
                 "asset_status": i.get("asset_status"),
             }
@@ -251,20 +307,40 @@ async def award_writing(request: Request):
 @app.get("/judging", response_class=HTMLResponse)
 async def award_judging(request: Request):
     grouped, last_sync = _grouped_edna_items()
+    chart_data = _judging_stats(grouped)
     return templates.TemplateResponse(request, "award_judging.html", {
         "groups": grouped,
         "last_sync": last_sync,
+        "chart_data": chart_data,
     })
 
 
 @app.post("/sync/monday", response_class=HTMLResponse)
 async def trigger_sync_monday(request: Request):
-    result = sync_monday(DB_PATH, settings)
+    """Quick sync: only Active group from Edna tracker."""
+    from src.adapters.monday_sync import sync_monday_quick
+    result = sync_monday_quick(DB_PATH, settings)
     grouped, last_sync = _grouped_edna_items()
+    chart_data = _judging_stats(grouped)
     return templates.TemplateResponse(request, "award_judging.html", {
         "groups": grouped,
         "last_sync": last_sync,
         "sync_result": result,
+        "chart_data": chart_data,
+    })
+
+
+@app.post("/sync/monday-full", response_class=HTMLResponse)
+async def trigger_sync_monday_full(request: Request):
+    """Full sync: all groups from Edna tracker + Submission tracker."""
+    result = sync_monday(DB_PATH, settings)
+    grouped, last_sync = _grouped_edna_items()
+    chart_data = _judging_stats(grouped)
+    return templates.TemplateResponse(request, "award_judging.html", {
+        "groups": grouped,
+        "last_sync": last_sync,
+        "sync_result": result,
+        "chart_data": chart_data,
     })
 
 

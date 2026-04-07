@@ -27,12 +27,31 @@ class MondayAdapter:
             timeout=90.0,
         )
 
-    def get_edna_items(self) -> list[EdnaItem]:
-        """Fetch all items from the Briefed Edna Tracker board."""
+    def get_board_group_ids(self, board_id: int, group_titles: list[str]) -> list[str]:
+        """Look up Monday group IDs by their display titles."""
+        query = f'{{ boards(ids: [{board_id}]) {{ groups {{ id title }} }} }}'
+        response = self._execute_query(query)
+        groups = response["data"]["boards"][0]["groups"]
+        title_lower = {t.lower() for t in group_titles}
+        return [g["id"] for g in groups if g["title"].lower() in title_lower]
+
+    def get_edna_items(self, groups: list[str] | None = None) -> list[EdnaItem]:
+        """Fetch items from the Briefed Edna Tracker board.
+
+        Args:
+            groups: Optional list of group titles to fetch (e.g. ["Active"]).
+                    If None, fetches all items.
+        """
         board_id = self.boards["edna_tracker"]
         col_map = self.columns["edna_tracker"]
 
-        items = self._fetch_board_items(board_id, label="edna tracker")
+        group_ids = None
+        if groups:
+            group_ids = self.get_board_group_ids(board_id, groups)
+            if not group_ids:
+                logger.warning("No matching group IDs found for %s", groups)
+
+        items = self._fetch_board_items(board_id, label="edna tracker", group_ids=group_ids)
 
         edna_items: list[EdnaItem] = []
         for item in items:
@@ -118,13 +137,13 @@ class MondayAdapter:
 
     # -- Internal helpers -----------------------------------------------------
 
-    def _fetch_board_items(self, board_id: int, label: str = "items") -> list[dict]:
+    def _fetch_board_items(self, board_id: int, label: str = "items", group_ids: list[str] | None = None) -> list[dict]:
         """Paginate through a board's items_page and return all raw item dicts."""
         all_items: list[dict] = []
         cursor: str | None = None
 
         while True:
-            query = _build_items_query(board_id, cursor)
+            query = _build_items_query(board_id, cursor, group_ids=group_ids)
             response = self._execute_query(query)
 
             items_page = response["data"]["boards"][0]["items_page"]
@@ -168,16 +187,26 @@ class MondayAdapter:
 # -- Module-level helpers (pure functions) ------------------------------------
 
 
-def _build_items_query(board_id: int, cursor: str | None) -> str:
-    """Build the GraphQL query string for fetching a page of board items."""
+def _build_items_query(board_id: int, cursor: str | None, group_ids: list[str] | None = None) -> str:
+    """Build the GraphQL query string for fetching a page of board items.
+
+    Args:
+        group_ids: Optional list of Monday group IDs to filter by.
+    """
     if cursor is None:
         cursor_arg = ""
     else:
         cursor_arg = f', cursor: "{cursor}"'
 
+    # Add group filter via query_params if specified
+    query_params = ""
+    if group_ids and not cursor:
+        rules = ", ".join(f'{{column_id: "group", compare_value: ["{gid}"]}}' for gid in group_ids)
+        query_params = f', query_params: {{rules: [{rules}]}}'
+
     return (
         "{ boards(ids: [" + str(board_id) + "]) {"
-        " items_page(limit: " + str(PAGE_LIMIT) + cursor_arg + ") {"
+        " items_page(limit: " + str(PAGE_LIMIT) + cursor_arg + query_params + ") {"
         " cursor items { id name created_at updated_at group { title }"
         " column_values { id text value"
         " ... on MirrorValue { display_value }"

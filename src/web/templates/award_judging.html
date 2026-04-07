@@ -49,6 +49,30 @@
 
     .empty-state { text-align: center; padding: 60px 20px; color: #888; }
     .empty-state p { margin-bottom: 12px; }
+
+    .stats-section { margin-top: 28px; }
+    .stats-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; cursor: pointer; user-select: none; }
+    .stats-header:hover { background: #eef0f2; }
+    .stats-header.collapsed + .stats-body { display: none; }
+    .stats-header.collapsed { border-radius: 8px; }
+    .stats-header:not(.collapsed) { border-radius: 8px 8px 0 0; }
+    .stats-chevron { font-size: 12px; color: #666; transition: transform 0.2s; width: 16px; text-align: center; }
+    .stats-header.collapsed .stats-chevron { transform: rotate(-90deg); }
+    .stats-title { font-size: 14px; font-weight: 700; color: #1a1a2e; }
+    .stats-count { font-size: 12px; color: #888; font-weight: 500; }
+    .stats-body { background: white; border: 1px solid #e9ecef; border-top: none; border-radius: 0 0 8px 8px; padding: 20px; }
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .stats-card { background: #fafbfc; border: 1px solid #e9ecef; border-radius: 8px; padding: 16px; }
+    .stats-card h4 { font-size: 13px; font-weight: 600; color: #555; margin-bottom: 10px; }
+    .stats-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .stats-table th { text-align: left; padding: 6px 10px; font-size: 11px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.3px; border-bottom: 2px solid #e9ecef; cursor: pointer; user-select: none; white-space: nowrap; }
+    .stats-table th:hover { color: #555; }
+    .stats-table th .sort-arrow { font-size: 9px; margin-left: 3px; color: #bbb; }
+    .stats-table th.sorted .sort-arrow { color: #662d91; }
+    .stats-table td { padding: 5px 10px; border-bottom: 1px solid #f0f0f0; }
+    .stats-table tr:hover { background: #f5f6f8; }
+    .stats-table .num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .stats-table .muted { color: #999; font-weight: 400; }
 </style>
 
 <div class="page-header">
@@ -63,8 +87,18 @@
                 hx-swap="innerHTML"
                 hx-select="#judging-content"
                 hx-disabled-elt="this">
-            <span class="idle">Refresh from Monday</span>
+            <span class="idle">Quick Refresh</span>
             <span class="loading"><span class="spinner"></span> Syncing...</span>
+        </button>
+        <button class="btn-refresh" style="font-size:11px;padding:4px 10px;opacity:0.7;"
+                hx-post="/sync/monday-full"
+                hx-target="#judging-content"
+                hx-swap="innerHTML"
+                hx-select="#judging-content"
+                hx-disabled-elt="this"
+                title="Sync all groups including 2025 and Done (slower)">
+            <span class="idle">Full Sync</span>
+            <span class="loading"><span class="spinner"></span> Full sync...</span>
         </button>
     </div>
 </div>
@@ -163,12 +197,80 @@
 {% endif %}
 </div>
 
+{% if chart_data and chart_data.total_reviewed > 0 %}
+<div class="stats-section">
+    <div class="stats-header" onclick="toggleStats(this)">
+        <span class="stats-chevron">&#9660;</span>
+        <span class="stats-title">Judging Stats</span>
+        <span class="stats-count">({{ chart_data.total_reviewed }} reviewed)</span>
+    </div>
+    <div class="stats-body">
+        <div class="stats-grid">
+            <div class="stats-card">
+                <h4>Score by Award</h4>
+                <table class="stats-table" id="table-by-award">
+                    <thead>
+                        <tr>
+                            <th data-sort="text" class="sorted">Award <span class="sort-arrow">&#9660;</span></th>
+                            <th data-sort="num">Avg Score <span class="sort-arrow">&#9660;</span></th>
+                            <th data-sort="num">Count <span class="sort-arrow">&#9660;</span></th>
+                            <th data-sort="text">Top Writer <span class="sort-arrow">&#9660;</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in chart_data.by_award %}
+                        <tr>
+                            <td>{{ row.award }}</td>
+                            <td class="num">{{ row.avg_score }}</td>
+                            <td class="num">{{ row.count }}</td>
+                            <td>{{ row.top_writer }} <span class="muted">({{ row.top_writer_count }})</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="stats-card">
+                <h4>Score by Writer</h4>
+                <table class="stats-table" id="table-by-writer">
+                    <thead>
+                        <tr>
+                            <th data-sort="text" class="sorted">Writer <span class="sort-arrow">&#9660;</span></th>
+                            <th data-sort="num">Avg Score <span class="sort-arrow">&#9660;</span></th>
+                            <th data-sort="num">Count <span class="sort-arrow">&#9660;</span></th>
+                            <th data-sort="text">Top Award <span class="sort-arrow">&#9660;</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in chart_data.by_writer %}
+                        <tr>
+                            <td>{{ row.writer }}</td>
+                            <td class="num">{{ row.avg_score }}</td>
+                            <td class="num">{{ row.count }}</td>
+                            <td>{{ row.top_award }} <span class="muted">({{ row.top_award_count }})</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <script>
 function toggleGroup(header) {
     header.classList.toggle('collapsed');
     const wrap = header.nextElementSibling;
     if (wrap) {
         wrap.style.display = header.classList.contains('collapsed') ? 'none' : '';
+    }
+}
+
+function toggleStats(header) {
+    header.classList.toggle('collapsed');
+    const body = header.nextElementSibling;
+    if (body) {
+        body.style.display = header.classList.contains('collapsed') ? 'none' : '';
     }
 }
 
@@ -214,5 +316,34 @@ function launchJudge(btn) {
         alert('Failed to launch: ' + err.message);
     });
 }
+
+// -- Sortable stats tables --
+document.querySelectorAll('.stats-table th[data-sort]').forEach(th => {
+    th.addEventListener('click', function() {
+        const table = th.closest('table');
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const colIdx = Array.from(th.parentNode.children).indexOf(th);
+        const sortType = th.dataset.sort;
+
+        // Toggle direction
+        const asc = th.classList.contains('sorted-asc');
+        table.querySelectorAll('th').forEach(h => h.classList.remove('sorted', 'sorted-asc', 'sorted-desc'));
+        th.classList.add('sorted', asc ? 'sorted-desc' : 'sorted-asc');
+
+        rows.sort((a, b) => {
+            let va = a.children[colIdx].textContent.trim();
+            let vb = b.children[colIdx].textContent.trim();
+            if (sortType === 'num') {
+                va = parseFloat(va) || 0;
+                vb = parseFloat(vb) || 0;
+                return asc ? vb - va : va - vb;
+            }
+            return asc ? vb.localeCompare(va) : va.localeCompare(vb);
+        });
+
+        rows.forEach(r => tbody.appendChild(r));
+    });
+});
 </script>
 {% endblock %}

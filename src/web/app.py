@@ -2,6 +2,8 @@
 
 import json
 import logging
+import os
+import tempfile
 from collections import defaultdict
 
 import uvicorn
@@ -16,13 +18,16 @@ from src.adapters.claude_cli import analyse, chat_sync
 from src.adapters.monday_sync import sync_monday, sync_submissions
 from src.store.cache import (
     apply_default_guidelines,
+    apply_default_velma_guidelines,
     get_ai_insights,
     get_all_edna_items,
     get_all_submission_items,
+    get_all_velma_items,
     get_submission_alerts,
     get_sync_meta,
     set_sync_meta,
     update_guideline,
+    update_velma_guideline,
     upsert_ai_insights,
 )
 from src.store.db import get_db
@@ -36,8 +41,30 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 settings = load_settings()
 DB_PATH = settings["database"]["path"]
 
+# Signal flag: set when a velma process completes and the frontend should refresh
+_velma_refresh_pending = False
+
 # Group display order
 GROUP_ORDER = ["Active", "Done", "2025"]
+
+# Velma writing state machine
+VELMA_STATUS_ACTIONS = {
+    "Transcript Ready": ["process", "process-interview-write"],
+    "Ready for Mapping": ["map", "map-write"],
+    "Interview Processed": ["write"],
+    "Mapped": ["write"],
+    "Mapped and Processed": ["write"],
+}
+
+VELMA_ACTION_FLAGS = {
+    "process": ["guidelines", "batch", "interview_notes", "supporting_docs", "custom"],
+    "map": ["guidelines", "batch", "custom"],
+    "write": ["guidelines", "batch", "interview_notes", "pre_interview", "supporting_docs", "custom"],
+    "process-interview-write": ["guidelines", "batch", "interview_notes", "pre_interview", "supporting_docs", "custom"],
+    "map-write": ["guidelines", "batch", "interview_notes", "pre_interview", "supporting_docs", "custom"],
+}
+
+VELMA_ACTIONS = set(VELMA_ACTION_FLAGS.keys())
 
 
 def _grouped_edna_items() -> tuple[dict[str, list[dict]], str | None]:
@@ -54,6 +81,29 @@ def _grouped_edna_items() -> tuple[dict[str, list[dict]], str | None]:
         groups[group_name].append(item)
 
     # Sort into defined order, then any extras
+    ordered: dict[str, list[dict]] = {}
+    for name in GROUP_ORDER:
+        if name in groups:
+            ordered[name] = groups.pop(name)
+    for name in sorted(groups.keys()):
+        ordered[name] = groups[name]
+
+    return ordered, last_sync
+
+
+def _grouped_velma_items() -> tuple[dict[str, list[dict]], str | None]:
+    """Load velma items from cache, grouped by board_group."""
+    conn = get_db(DB_PATH)
+    apply_default_velma_guidelines(conn)
+    items = get_all_velma_items(conn)
+    last_sync = get_sync_meta(conn, "velma_last_sync")
+    conn.close()
+
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for item in items:
+        group_name = item.get("board_group") or "Ungrouped"
+        groups[group_name].append(item)
+
     ordered: dict[str, list[dict]] = {}
     for name in GROUP_ORDER:
         if name in groups:
@@ -301,17 +351,302 @@ async def award_plans(request: Request):
 
 @app.get("/writing", response_class=HTMLResponse)
 async def award_writing(request: Request):
-    return templates.TemplateResponse(request, "award_writing.html")
+    grouped, last_sync = _grouped_velma_items()
+    velma_board_id = settings["monday"]["boards"]["velma_tracker"]
+    return templates.TemplateResponse(request, "award_writing.html", {
+        "groups": grouped,
+        "last_sync": last_sync,
+        "velma_board_id": velma_board_id,
+        "status_actions": VELMA_STATUS_ACTIONS,
+        "action_flags": VELMA_ACTION_FLAGS,
+    })
+
+
+@app.post("/sync/velma", response_class=HTMLResponse)
+async def trigger_sync_velma(request: Request):
+    """Quick sync: only Active group from Velma tracker."""
+    from src.adapters.monday_sync import sync_velma_quick
+    result = sync_velma_quick(DB_PATH, settings)
+    grouped, last_sync = _grouped_velma_items()
+    velma_board_id = settings["monday"]["boards"]["velma_tracker"]
+    return templates.TemplateResponse(request, "award_writing.html", {
+        "groups": grouped,
+        "last_sync": last_sync,
+        "sync_result": result,
+        "velma_board_id": velma_board_id,
+        "status_actions": VELMA_STATUS_ACTIONS,
+        "action_flags": VELMA_ACTION_FLAGS,
+    })
+
+
+@app.post("/sync/velma-full", response_class=HTMLResponse)
+async def trigger_sync_velma_full(request: Request):
+    """Full sync: all groups from Velma tracker."""
+    from src.adapters.monday_sync import sync_velma
+    result = sync_velma(DB_PATH, settings)
+    grouped, last_sync = _grouped_velma_items()
+    velma_board_id = settings["monday"]["boards"]["velma_tracker"]
+    return templates.TemplateResponse(request, "award_writing.html", {
+        "groups": grouped,
+        "last_sync": last_sync,
+        "sync_result": result,
+        "velma_board_id": velma_board_id,
+        "status_actions": VELMA_STATUS_ACTIONS,
+        "action_flags": VELMA_ACTION_FLAGS,
+    })
+
+
+@app.post("/api/writing/velma-done")
+async def signal_velma_done():
+    """Called by terminal when a velma process finishes. Sets a flag for the frontend to pick up."""
+    global _velma_refresh_pending
+    _velma_refresh_pending = True
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/writing/velma-done")
+async def check_velma_done():
+    """Polled by the frontend to check if a velma process has completed."""
+    global _velma_refresh_pending
+    if _velma_refresh_pending:
+        _velma_refresh_pending = False
+        return JSONResponse({"refresh": True})
+    return JSONResponse({"refresh": False})
+
+
+@app.post("/api/writing/guideline")
+async def save_velma_guideline(request: Request):
+    """Persist a guideline change for a single Velma item."""
+    data = await request.json()
+    monday_id = data.get("monday_id")
+    guideline = data.get("guideline")
+    if not monday_id or guideline not in ("m", "s", "a"):
+        return JSONResponse({"error": "Invalid parameters"}, status_code=400)
+    conn = get_db(DB_PATH)
+    update_velma_guideline(conn, monday_id, guideline)
+    conn.close()
+    return JSONResponse({"ok": True})
+
+
+VELMA_VALID_STATUSES = {
+    "Transcript Ready", "Ready for Mapping", "Interview Processed",
+    "Mapped", "Mapped and Processed", "Done", "ERROR",
+}
+
+
+@app.post("/api/writing/status")
+async def save_velma_status(request: Request):
+    """Update the Velma Status on Monday.com and in the local cache."""
+    from config.settings import get_monday_token
+    from src.adapters.monday import MondayAdapter
+
+    data = await request.json()
+    monday_id = data.get("monday_id")
+    new_status = data.get("status")
+
+    if not monday_id or new_status not in VELMA_VALID_STATUSES:
+        return JSONResponse({"error": "Invalid parameters"}, status_code=400)
+
+    board_id = settings["monday"]["boards"]["velma_tracker"]
+    status_col_id = settings["monday"]["columns"]["velma_tracker"]["velma_status"]
+
+    try:
+        token = get_monday_token()
+        adapter = MondayAdapter(settings=settings, api_token=token)
+        success = adapter.update_item_status(board_id, monday_id, status_col_id, new_status)
+        if not success:
+            return JSONResponse({"error": "Monday.com update failed"}, status_code=500)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    # Update local cache
+    conn = get_db(DB_PATH)
+    conn.execute(
+        "UPDATE cache_velma_items SET velma_status = ? WHERE monday_id = ?",
+        (new_status, monday_id),
+    )
+    conn.commit()
+    conn.close()
+
+    return JSONResponse({"ok": True})
+
+
+PREV_SUBMISSION_SLOTS = {
+    1: "link_mm0h124p",  # prev_submission_1
+    2: "link_mm0hx5kt",  # prev_submission_2
+}
+
+
+@app.get("/api/writing/prev-submissions/{monday_id}")
+async def get_prev_submissions(monday_id: str):
+    """Get previous submissions for the same company as a Velma item."""
+    conn = get_db(DB_PATH)
+
+    # Look up Velma item's linked submission tracker ID
+    row = conn.execute(
+        "SELECT tracker_submission_id FROM cache_velma_items WHERE monday_id = ?",
+        (monday_id,),
+    ).fetchone()
+    if not row or not row["tracker_submission_id"]:
+        conn.close()
+        return JSONResponse({"submissions": [], "company": None})
+
+    # Look up company from submission tracker
+    sub_row = conn.execute(
+        "SELECT company FROM cache_submission_items WHERE monday_id = ?",
+        (row["tracker_submission_id"],),
+    ).fetchone()
+    if not sub_row or not sub_row["company"]:
+        conn.close()
+        return JSONResponse({"submissions": [], "company": None})
+
+    company = sub_row["company"]
+
+    # Get all submissions for this company
+    rows = conn.execute(
+        """SELECT monday_id, name, award, category, delivery_status, result_status,
+                  submission_link_url, submission_link_text
+           FROM cache_submission_items
+           WHERE company = ?
+           ORDER BY close_date DESC, monday_updated_at DESC""",
+        (company,),
+    ).fetchall()
+    conn.close()
+
+    submissions = [
+        {
+            "monday_id": r["monday_id"],
+            "name": r["name"],
+            "award": r["award"],
+            "category": r["category"],
+            "delivery_status": r["delivery_status"],
+            "result_status": r["result_status"],
+            "link": r["submission_link_url"],
+            "link_text": r["submission_link_text"] or r["name"],
+        }
+        for r in rows
+    ]
+
+    return JSONResponse({"submissions": submissions, "company": company})
+
+
+@app.post("/api/writing/prev-submission")
+async def update_prev_submission(request: Request):
+    """Set or clear a prev_submission link on a Velma item (writes to Monday)."""
+    from config.settings import get_monday_token
+    from src.adapters.monday import MondayAdapter
+
+    data = await request.json()
+    monday_id = data.get("monday_id")
+    slot = data.get("slot")
+    url = data.get("url")  # None to clear
+    text = data.get("text", "")
+
+    if not monday_id or slot not in (1, 2):
+        return JSONResponse({"error": "Invalid parameters"}, status_code=400)
+
+    col_id = PREV_SUBMISSION_SLOTS[slot]
+    board_id = settings["monday"]["boards"]["velma_tracker"]
+
+    # Build link value
+    if url:
+        link_val = {"url": url, "text": text}
+    else:
+        link_val = {"url": "", "text": ""}
+
+    try:
+        token = get_monday_token()
+        adapter = MondayAdapter(settings=settings, api_token=token)
+        success = adapter.update_item_columns(board_id, monday_id, {col_id: link_val})
+        if not success:
+            return JSONResponse({"error": "Monday.com update failed"}, status_code=500)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    # Update local cache
+    conn = get_db(DB_PATH)
+    url_col = f"prev_submission_{slot}_url"
+    text_col = f"prev_submission_{slot}_text"
+    conn.execute(
+        f"UPDATE cache_velma_items SET {url_col} = ?, {text_col} = ? WHERE monday_id = ?",  # noqa: S608
+        (url if url else None, text if url else None, monday_id),
+    )
+    conn.commit()
+    conn.close()
+
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/writing/launch")
+async def launch_writing(request: Request):
+    """Open Terminal.app with a velma command."""
+    import subprocess
+
+    data = await request.json()
+    name = data.get("name", "")
+    action = data.get("action", "")
+    guideline = data.get("guideline")
+    batch = data.get("batch", False)
+    interview_notes = data.get("interview_notes", False)
+    supporting_docs = data.get("supporting_docs", False)
+    pre_interview = data.get("pre_interview", False)
+    custom = data.get("custom", "")
+    award = data.get("award", "")
+
+    if not name or action not in VELMA_ACTIONS:
+        return JSONResponse({"error": "Invalid parameters"}, status_code=400)
+
+    safe_name = name.replace("'", "'\\''")
+    cmd = f"velma {action} '{safe_name}'"
+
+    if guideline:
+        cmd += f" -g {guideline}"
+    if batch:
+        cmd += " --batch"
+    if interview_notes:
+        cmd += " --interview-notes"
+    if supporting_docs:
+        cmd += " --supporting-docs"
+    if pre_interview:
+        cmd += " --pre-interview"
+    if custom:
+        safe_custom = custom.replace("'", "'\\''")
+        cmd += f" --custom '{safe_custom}'"
+    if award:
+        safe_award = award.replace("'", "'\\''")
+        cmd += f" --award '{safe_award}'"
+
+    # Write a temp script that runs velma, triggers refresh, and closes the terminal window
+    script_content = f"""#!/bin/bash
+{cmd}
+curl -s -X POST http://127.0.0.1:8001/api/writing/velma-done > /dev/null 2>&1
+sleep 1
+osascript -e 'tell application "Terminal" to close front window' &
+exit
+"""
+    script_file = tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False, prefix='velma_')
+    script_file.write(script_content)
+    script_file.close()
+    os.chmod(script_file.name, 0o755)
+
+    osascript = f'''tell application "Terminal"
+  activate
+  do script "{script_file.name}"
+end tell'''
+    subprocess.Popen(["osascript", "-e", osascript])
+    return JSONResponse({"ok": True, "command": cmd})
 
 
 @app.get("/judging", response_class=HTMLResponse)
 async def award_judging(request: Request):
     grouped, last_sync = _grouped_edna_items()
     chart_data = _judging_stats(grouped)
+    edna_board_id = settings["monday"]["boards"]["edna_tracker"]
     return templates.TemplateResponse(request, "award_judging.html", {
         "groups": grouped,
         "last_sync": last_sync,
         "chart_data": chart_data,
+        "edna_board_id": edna_board_id,
     })
 
 
@@ -322,11 +657,13 @@ async def trigger_sync_monday(request: Request):
     result = sync_monday_quick(DB_PATH, settings)
     grouped, last_sync = _grouped_edna_items()
     chart_data = _judging_stats(grouped)
+    edna_board_id = settings["monday"]["boards"]["edna_tracker"]
     return templates.TemplateResponse(request, "award_judging.html", {
         "groups": grouped,
         "last_sync": last_sync,
         "sync_result": result,
         "chart_data": chart_data,
+        "edna_board_id": edna_board_id,
     })
 
 
@@ -336,11 +673,13 @@ async def trigger_sync_monday_full(request: Request):
     result = sync_monday(DB_PATH, settings)
     grouped, last_sync = _grouped_edna_items()
     chart_data = _judging_stats(grouped)
+    edna_board_id = settings["monday"]["boards"]["edna_tracker"]
     return templates.TemplateResponse(request, "award_judging.html", {
         "groups": grouped,
         "last_sync": last_sync,
         "sync_result": result,
         "chart_data": chart_data,
+        "edna_board_id": edna_board_id,
     })
 
 

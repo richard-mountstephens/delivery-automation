@@ -1,6 +1,927 @@
 {% extends "base.html" %}
 {% block title %}Award Writing — Delivery Hub{% endblock %}
 {% block content %}
-<h2 style="margin-bottom: 8px;">Award Writing</h2>
-<p class="text-muted">Coming soon.</p>
+<style>
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .page-header h2 { font-size: 20px; font-weight: 700; color: #1a1a2e; }
+    .header-actions { display: flex; align-items: center; gap: 12px; }
+    .sync-status { font-size: 13px; color: #888; }
+    .btn-refresh { background: #662d91; color: white; border: none; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .btn-refresh:hover { background: #7b3aab; }
+    .btn-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-refresh .loading { display: none; }
+    .btn-refresh.htmx-request .loading { display: inline; }
+    .btn-refresh.htmx-request .idle { display: none; }
+    .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 4px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .group { margin-bottom: 24px; }
+    .group-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px 8px 0 0; cursor: pointer; user-select: none; }
+    .group-header:hover { background: #eef0f2; }
+    .group-header.collapsed { border-radius: 8px; }
+    .group-chevron { font-size: 12px; color: #666; transition: transform 0.2s; width: 16px; text-align: center; }
+    .group-header.collapsed .group-chevron { transform: rotate(-90deg); }
+    .group-title { font-size: 14px; font-weight: 700; color: #1a1a2e; }
+    .group-count { font-size: 12px; color: #888; font-weight: 500; }
+    .group-table-wrap { overflow-x: auto; }
+    .group-header.collapsed + .group-table-wrap { display: none; }
+
+    .group-table { border-radius: 0 0 8px 8px; border-top: none; }
+    .group-table th { position: sticky; top: 0; z-index: 1; }
+    .group-table td { vertical-align: middle; }
+    .group-table td:first-child { max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .status-transcript-ready { background: #e3f2fd; color: #1565c0; }
+    .status-ready-mapping { background: #f3e5f5; color: #7b1fa2; }
+    .status-interview-processed { background: #e8f5e9; color: #2e7d32; }
+    .status-mapped { background: #fff3e0; color: #b86e00; }
+    .status-mapped-processed { background: #e0f2f1; color: #00695c; }
+    .status-done { background: #e6f9ee; color: #0a7c3e; }
+    .status-error { background: #fde8e8; color: #c62828; }
+
+    .link-cell a { color: #1565c0; text-decoration: none; font-size: 13px; }
+    .link-cell a:hover { text-decoration: underline; }
+
+    .btn-docs { background: none; border: 1px solid #ddd; padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; color: #555; }
+    .btn-docs:hover { background: #f0f0f0; border-color: #bbb; }
+
+    .guide-select { padding: 2px 4px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; font-weight: 600; background: white; cursor: pointer; }
+    .guide-select:focus { outline: none; border-color: #662d91; }
+
+    .action-select { padding: 2px 4px; border: 1px solid #ddd; border-radius: 4px; font-size: 11px; background: white; cursor: pointer; max-width: 140px; }
+
+    .btn-action { background: #662d91; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; }
+    .btn-action:hover { background: #7b3aab; }
+    .btn-action:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .empty-state { text-align: center; padding: 60px 20px; color: #888; }
+    .empty-state p { margin-bottom: 12px; }
+
+    /* Sortable + filterable headers */
+    .group-table th { cursor: pointer; user-select: none; white-space: nowrap; position: relative; }
+    .group-table th.no-sort { cursor: default; }
+    .group-table th .sort-indicator { font-size: 9px; margin-left: 3px; color: #bbb; }
+    .group-table th.sorted-asc .sort-indicator,
+    .group-table th.sorted-desc .sort-indicator { color: #662d91; }
+    .group-table th.sorted-asc .sort-indicator::after { content: '\25B2'; }
+    .group-table th.sorted-desc .sort-indicator::after { content: '\25BC'; }
+    .group-table th:not(.sorted-asc):not(.sorted-desc) .sort-indicator::after { content: '\25BC'; }
+
+    /* Filter bar */
+    .filter-bar { display: flex; gap: 10px; align-items: center; padding: 8px 14px; background: #fff; border: 1px solid #e9ecef; border-top: none; font-size: 12px; flex-wrap: wrap; }
+    .filter-bar label { color: #888; font-weight: 600; }
+    .filter-select { padding: 3px 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; background: white; cursor: pointer; }
+    .filter-select:focus { outline: none; border-color: #662d91; }
+    .filter-active { border-color: #662d91; background: #f9f0ff; }
+    .btn-clear-filters { background: none; border: 1px solid #ddd; padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; color: #888; }
+    .btn-clear-filters:hover { background: #f0f0f0; }
+    .updated-cell { font-size: 12px; color: #888; white-space: nowrap; }
+
+    /* Prev submissions in docs popup */
+    .prev-subs-section { margin-top: 16px; }
+    .prev-subs-section h4 { font-size: 12px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; border-bottom: 1px solid #f0f0f0; padding-bottom: 4px; }
+    .prev-subs-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .prev-subs-table th { text-align: left; padding: 4px 6px; font-size: 11px; font-weight: 600; color: #888; border-bottom: 1px solid #e9ecef; }
+    .prev-subs-table td { padding: 4px 6px; border-bottom: 1px solid #f0f0f0; }
+    .prev-subs-table tr:hover { background: #f8f9ff; }
+    .prev-subs-table a { color: #1565c0; text-decoration: none; }
+    .prev-subs-table a:hover { text-decoration: underline; }
+    .prev-subs-table input[type="radio"] { cursor: pointer; }
+    .prev-subs-loading { color: #888; font-size: 12px; padding: 8px 0; }
+    .prev-subs-empty { color: #bbb; font-size: 12px; padding: 8px 0; }
+    .prev-subs-footer { display: flex; justify-content: flex-end; margin-top: 10px; gap: 8px; }
+    .btn-save-slots { background: #662d91; color: white; border: none; padding: 6px 16px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; }
+    .btn-save-slots:hover { background: #7b3aab; }
+    .btn-save-slots:disabled { opacity: 0.5; cursor: not-allowed; }
+    .slot-saved { color: #0a7c3e; font-size: 12px; font-weight: 600; display: none; }
+
+    /* Status select */
+    .status-select { padding: 2px 4px; border: 1px solid #ddd; border-radius: 4px; font-size: 11px; font-weight: 600; background: white; cursor: pointer; }
+    .status-select:focus { outline: none; border-color: #662d91; }
+    .status-select.saving { opacity: 0.5; }
+
+    /* Overlay / popup shared */
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); display: none; z-index: 200; align-items: center; justify-content: center; }
+    .overlay.open { display: flex; }
+    .popup-card { background: white; border-radius: 10px; width: 520px; max-height: 80vh; overflow-y: auto; padding: 24px; position: relative; box-shadow: 0 8px 32px rgba(0,0,0,0.18); }
+    .popup-close { position: absolute; top: 12px; right: 16px; background: none; border: none; font-size: 22px; cursor: pointer; color: #888; line-height: 1; }
+    .popup-close:hover { color: #333; }
+    .popup-card h3 { font-size: 16px; font-weight: 700; color: #1a1a2e; margin-bottom: 16px; padding-right: 30px; }
+
+    /* Docs popup */
+    .docs-section { margin-bottom: 14px; }
+    .docs-section h4 { font-size: 12px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; border-bottom: 1px solid #f0f0f0; padding-bottom: 4px; }
+    .docs-row { display: flex; align-items: center; padding: 4px 0; font-size: 13px; }
+    .docs-label { width: 140px; color: #666; flex-shrink: 0; }
+    .docs-value { flex: 1; }
+    .docs-value a { color: #1565c0; text-decoration: none; }
+    .docs-value a:hover { text-decoration: underline; }
+    .docs-empty { color: #ccc; }
+
+    /* Launch popup */
+    .launch-info { display: grid; grid-template-columns: 100px 1fr; gap: 6px 12px; margin-bottom: 16px; font-size: 13px; }
+    .launch-info .label { color: #888; font-weight: 600; }
+    .launch-info .value { color: #1a1a2e; }
+    .launch-options { margin-bottom: 16px; }
+    .launch-options h4 { font-size: 12px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+    .opt-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
+    .opt-row label { color: #333; cursor: pointer; }
+    .opt-row input[type="checkbox"] { cursor: pointer; }
+    .opt-row select, .opt-row input[type="text"] { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+    .opt-row input[type="text"] { flex: 1; }
+    .launch-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    .btn-cancel { background: #f0f0f0; color: #555; border: none; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .btn-cancel:hover { background: #e0e0e0; }
+    .btn-launch { background: #662d91; color: white; border: none; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .btn-launch:hover { background: #7b3aab; }
+    .btn-launch:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+
+<div class="page-header">
+    <h2>Award Writing</h2>
+    <div class="header-actions">
+        <span class="sync-status">
+            {% if last_sync %}Last synced: {{ last_sync }}{% else %}Not synced yet{% endif %}
+        </span>
+        <button class="btn-refresh"
+                hx-post="/sync/velma"
+                hx-target="#writing-content"
+                hx-swap="innerHTML"
+                hx-select="#writing-content"
+                hx-disabled-elt="this">
+            <span class="idle">Quick Refresh</span>
+            <span class="loading"><span class="spinner"></span> Syncing...</span>
+        </button>
+        <label style="font-size:11px;color:#888;cursor:pointer;display:flex;align-items:center;gap:4px;">
+            <input type="checkbox" id="auto-refresh-toggle" onchange="toggleAutoRefresh(this)" style="cursor:pointer;">
+            Auto (2m)
+        </label>
+        <button class="btn-refresh" style="font-size:11px;padding:4px 10px;opacity:0.7;"
+                hx-post="/sync/velma-full"
+                hx-target="#writing-content"
+                hx-swap="innerHTML"
+                hx-select="#writing-content"
+                hx-disabled-elt="this"
+                title="Sync all groups including Done (slower)">
+            <span class="idle">Full Sync</span>
+            <span class="loading"><span class="spinner"></span> Full sync...</span>
+        </button>
+    </div>
+</div>
+
+{% if sync_result is defined and sync_result %}
+<div class="alert alert-success">
+    Synced {{ sync_result.velma_synced }} items ({{ sync_result.velma_unchanged }} unchanged) in {{ sync_result.duration_seconds }}s
+    {% if sync_result.errors %}
+    <br><strong>Errors:</strong> {{ sync_result.errors | join(', ') }}
+    {% endif %}
+</div>
+{% endif %}
+
+<div id="writing-content">
+{% if groups and groups | length > 0 %}
+    {% for group_name, items in groups.items() %}
+    <div class="group">
+        <div class="group-header {% if not loop.first %}collapsed{% endif %}" onclick="toggleGroup(this)">
+            <span class="group-chevron">&#9660;</span>
+            <span class="group-title">{{ group_name }}</span>
+            <span class="group-count">({{ items | length }})</span>
+        </div>
+        <div class="group-table-wrap">
+            <div class="filter-bar">
+                <label>Filter:</label>
+                <select class="filter-select" data-col="1" onchange="applyFilters(this)">
+                    <option value="">All Awards</option>
+                </select>
+                <select class="filter-select" data-col="4" onchange="applyFilters(this)">
+                    <option value="">All Statuses</option>
+                </select>
+                <select class="filter-select" data-col="3" onchange="applyFilters(this)">
+                    <option value="">All Writers</option>
+                </select>
+                <button class="btn-clear-filters" onclick="clearFilters(this)">Clear</button>
+            </div>
+            <table class="group-table">
+                <thead>
+                    <tr>
+                        <th data-sort="text">Name <span class="sort-indicator"></span></th>
+                        <th data-sort="text">Award <span class="sort-indicator"></span></th>
+                        <th data-sort="text">Category <span class="sort-indicator"></span></th>
+                        <th data-sort="text">Writer <span class="sort-indicator"></span></th>
+                        <th data-sort="text">Velma Status <span class="sort-indicator"></span></th>
+                        <th class="no-sort">Docs</th>
+                        <th class="no-sort">Monday</th>
+                        <th data-sort="text">Guide <span class="sort-indicator"></span></th>
+                        <th data-sort="date">Updated <span class="sort-indicator"></span></th>
+                        <th class="no-sort">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    {% set actions = status_actions.get(item.velma_status, []) %}
+                    <tr data-docs='{{ {
+                        "interview_transcript": {"url": item.interview_transcript_url, "text": item.interview_transcript_text},
+                        "submission_link": {"url": item.submission_link, "text": item.submission_link},
+                        "prev_submission_1": {"url": item.prev_submission_1_url, "text": item.prev_submission_1_text},
+                        "prev_submission_2": {"url": item.prev_submission_2_url, "text": item.prev_submission_2_text},
+                        "supporting_doc_1": {"url": item.supporting_doc_1_url, "text": item.supporting_doc_1_text},
+                        "supporting_doc_2": {"url": item.supporting_doc_2_url, "text": item.supporting_doc_2_text},
+                        "supporting_doc_3": {"url": item.supporting_doc_3_url, "text": item.supporting_doc_3_text},
+                        "supporting_doc_4": {"url": item.supporting_doc_4_url, "text": item.supporting_doc_4_text},
+                        "processed_interview": {"url": item.processed_interview_url, "text": item.processed_interview_text},
+                        "mapped_submission": {"url": item.mapped_submission_url, "text": item.mapped_submission_text},
+                        "velma_draft": {"url": item.velma_draft_url, "text": item.velma_draft_text}
+                    } | tojson | e }}'>
+                        <td title="{{ item.name }}">{{ item.name }}</td>
+                        <td>{{ item.award or '—' }}</td>
+                        <td>{{ item.category or '—' }}</td>
+                        <td>{{ item.writer or '—' }}</td>
+                        <td>
+                            <select class="status-select"
+                                    data-monday-id="{{ item.monday_id }}"
+                                    onchange="saveVelmaStatus(this)">
+                                {% for s in ['Transcript Ready', 'Ready for Mapping', 'Interview Processed', 'Mapped', 'Mapped and Processed', 'Done', 'ERROR'] %}
+                                <option value="{{ s }}" {% if item.velma_status == s %}selected{% endif %}>{{ s }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td>
+                            <button class="btn-docs" onclick="showDocs(this)" data-monday-id="{{ item.monday_id }}" title="View documents">Docs</button>
+                        </td>
+                        <td class="link-cell">
+                            <a href="https://reputationbydesign.monday.com/boards/{{ velma_board_id }}/pulses/{{ item.monday_id }}" target="_blank" rel="noopener">View</a>
+                        </td>
+                        <td>
+                            <select class="guide-select"
+                                    data-monday-id="{{ item.monday_id }}"
+                                    onchange="saveVelmaGuideline(this)">
+                                <option value="m" {% if item.guideline == 'm' %}selected{% endif %}>m</option>
+                                <option value="s" {% if item.guideline == 's' or not item.guideline %}selected{% endif %}>s</option>
+                                <option value="a" {% if item.guideline == 'a' %}selected{% endif %}>a</option>
+                            </select>
+                        </td>
+                        <td class="updated-cell" data-ts="{{ item.monday_updated_at or '' }}">
+                            {% if item.monday_updated_at %}
+                                {{ item.monday_updated_at[:10] }}
+                            {% else %}&mdash;{% endif %}
+                        </td>
+                        <td>
+                            {% if actions %}
+                                {% if actions | length == 1 %}
+                                <button class="btn-action"
+                                        onclick="openLaunch(this)"
+                                        data-name="{{ item.name | e }}"
+                                        data-monday-id="{{ item.monday_id }}"
+                                        data-action="{{ actions[0] }}"
+                                        data-guideline="{{ item.guideline or 's' }}"
+                                        data-award="{{ item.award | e if item.award else '' }}">{{ actions[0] | replace('-', ' ') | title }}</button>
+                                {% else %}
+                                <div style="display:flex;gap:4px;align-items:center;">
+                                    <select class="action-select" data-monday-id="{{ item.monday_id }}">
+                                        {% for action in actions %}
+                                        <option value="{{ action }}">{{ action }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <button class="btn-action"
+                                            onclick="openLaunch(this)"
+                                            data-name="{{ item.name | e }}"
+                                            data-monday-id="{{ item.monday_id }}"
+                                            data-guideline="{{ item.guideline or 's' }}"
+                                            data-award="{{ item.award | e if item.award else '' }}">Go</button>
+                                </div>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="empty-state">
+        <p>No writing items yet.</p>
+        <p class="text-muted">Click "Quick Refresh" to pull data from the Briefed Velma Tracker board.</p>
+    </div>
+{% endif %}
+</div>
+
+<!-- Documents popup -->
+<div class="overlay" id="docs-overlay" onclick="if(event.target===this)closeDocs()">
+    <div class="popup-card">
+        <button class="popup-close" onclick="closeDocs()">&times;</button>
+        <h3 id="docs-title">Documents</h3>
+        <div id="docs-body"></div>
+        <div class="prev-subs-section" id="prev-subs-section">
+            <h4>Previous Submissions <span id="prev-subs-company" style="text-transform:none;font-weight:400;color:#555;"></span></h4>
+            <div id="prev-subs-body"><span class="prev-subs-loading">Loading...</span></div>
+        </div>
+    </div>
+</div>
+
+<!-- Launch confirmation popup -->
+<div class="overlay" id="launch-overlay" onclick="if(event.target===this)closeLaunch()">
+    <div class="popup-card">
+        <button class="popup-close" onclick="closeLaunch()">&times;</button>
+        <h3 id="launch-title">Launch Action</h3>
+        <div class="launch-info">
+            <span class="label">Action</span>
+            <span class="value" id="launch-action-display"></span>
+            <span class="label">Name</span>
+            <span class="value" id="launch-name-display"></span>
+        </div>
+        <div class="launch-options">
+            <h4>Options</h4>
+            <div class="opt-row" id="opt-guidelines">
+                <label for="launch-guideline">Guidelines:</label>
+                <select id="launch-guideline">
+                    <option value="">None</option>
+                    <option value="m">m - Mortgage</option>
+                    <option value="s">s - Stevie</option>
+                    <option value="a">a - Accounting</option>
+                </select>
+            </div>
+            <div class="opt-row" id="opt-batch">
+                <label><input type="checkbox" id="launch-batch"> Batch mode</label>
+            </div>
+            <div class="opt-row" id="opt-interview_notes">
+                <label><input type="checkbox" id="launch-interview-notes"> Interview notes</label>
+            </div>
+            <div class="opt-row" id="opt-supporting_docs">
+                <label><input type="checkbox" id="launch-supporting-docs"> Supporting docs</label>
+            </div>
+            <div class="opt-row" id="opt-pre_interview">
+                <label><input type="checkbox" id="launch-pre-interview"> Pre-interview mode</label>
+            </div>
+            <div class="opt-row" id="opt-custom">
+                <label for="launch-custom">Custom:</label>
+                <input type="text" id="launch-custom" placeholder="Optional custom instruction...">
+            </div>
+        </div>
+        <div class="launch-footer">
+            <button class="btn-cancel" onclick="closeLaunch()">Cancel</button>
+            <button class="btn-launch" id="launch-confirm" onclick="confirmLaunch()">Launch</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// State machine
+const ACTION_FLAGS = {{ action_flags | tojson }};
+const STATUS_ACTIONS = {{ status_actions | tojson }};
+
+// Current launch context
+let _launchCtx = {};
+
+function toggleGroup(header) {
+    header.classList.toggle('collapsed');
+    const wrap = header.nextElementSibling;
+    if (wrap) {
+        wrap.style.display = header.classList.contains('collapsed') ? 'none' : '';
+    }
+}
+
+function saveVelmaGuideline(sel) {
+    fetch('/api/writing/guideline', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            monday_id: sel.dataset.mondayId,
+            guideline: sel.value,
+        })
+    }).catch(err => alert('Failed to save guideline: ' + err.message));
+}
+
+function saveVelmaStatus(sel) {
+    const mondayId = sel.dataset.mondayId;
+    const newStatus = sel.value;
+    sel.classList.add('saving');
+
+    fetch('/api/writing/status', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ monday_id: mondayId, status: newStatus }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        sel.classList.remove('saving');
+        if (!data.ok) {
+            alert('Error: ' + (data.error || 'Unknown error'));
+            return;
+        }
+        // Update the Action column to reflect new available actions
+        const row = sel.closest('tr');
+        const actionCell = row.querySelector('td:last-child');
+        const actions = STATUS_ACTIONS[newStatus] || [];
+        const name = row.querySelector('td').textContent.trim();
+        const guideline = row.querySelector('.guide-select').value || 's';
+
+        if (actions.length === 0) {
+            actionCell.innerHTML = '';
+        } else if (actions.length === 1) {
+            actionCell.innerHTML = '<button class="btn-action" onclick="openLaunch(this)" data-name="' + escHtml(name) + '" data-monday-id="' + mondayId + '" data-action="' + actions[0] + '" data-guideline="' + guideline + '">' + actions[0].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + '</button>';
+        } else {
+            let opts = actions.map(a => '<option value="' + a + '">' + a + '</option>').join('');
+            actionCell.innerHTML = '<div style="display:flex;gap:4px;align-items:center;"><select class="action-select" data-monday-id="' + mondayId + '">' + opts + '</select><button class="btn-action" onclick="openLaunch(this)" data-name="' + escHtml(name) + '" data-monday-id="' + mondayId + '" data-guideline="' + guideline + '">Go</button></div>';
+        }
+    })
+    .catch(err => {
+        sel.classList.remove('saving');
+        alert('Failed to update status: ' + err.message);
+    });
+}
+
+// -- Documents popup --
+
+function showDocs(btn) {
+    _docsBtn = btn;
+    const row = btn.closest('tr');
+    const docs = JSON.parse(row.dataset.docs);
+    const name = row.querySelector('td').textContent.trim();
+
+    document.getElementById('docs-title').textContent = name;
+
+    const sections = [
+        { title: 'Inputs', items: [
+            ['Interview Transcript', docs.interview_transcript],
+        ]},
+        { title: 'Context', items: [
+            ['Submission Link', docs.submission_link],
+            ['Prev Submission 1', docs.prev_submission_1],
+            ['Prev Submission 2', docs.prev_submission_2],
+            ['Supporting Doc 1', docs.supporting_doc_1],
+            ['Supporting Doc 2', docs.supporting_doc_2],
+            ['Supporting Doc 3', docs.supporting_doc_3],
+            ['Supporting Doc 4', docs.supporting_doc_4],
+        ]},
+        { title: 'Outputs', items: [
+            ['Processed Interview', docs.processed_interview],
+            ['Mapped Submission', docs.mapped_submission],
+            ['Velma Draft', docs.velma_draft],
+        ]},
+    ];
+
+    let html = '';
+    for (const section of sections) {
+        html += '<div class="docs-section"><h4>' + section.title + '</h4>';
+        for (const [label, doc] of section.items) {
+            let url = doc && doc.url;
+            let text = doc && (doc.text || doc.url);
+            // Extract URL from combined "name - https://..." mirror values
+            if (url && !url.startsWith('http')) {
+                const match = url.match(/(https?:\/\/\S+)/);
+                if (match) {
+                    url = match[1];
+                } else {
+                    url = null; // not a valid URL, render as text only
+                }
+            }
+            html += '<div class="docs-row">';
+            html += '<span class="docs-label">' + label + '</span>';
+            if (url) {
+                const display = text.length > 50 ? text.substring(0, 47) + '...' : text;
+                html += '<span class="docs-value"><a href="' + escHtml(url) + '" target="_blank" rel="noopener">' + escHtml(display) + '</a></span>';
+            } else if (text) {
+                const display = text.length > 50 ? text.substring(0, 47) + '...' : text;
+                html += '<span class="docs-value">' + escHtml(display) + '</span>';
+            } else {
+                html += '<span class="docs-value docs-empty">&mdash;</span>';
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+
+    document.getElementById('docs-body').innerHTML = html;
+    document.getElementById('docs-overlay').classList.add('open');
+
+    // Fetch previous submissions
+    const mondayId = btn.dataset.mondayId;
+    const prevSub1 = docs.prev_submission_1;
+    const prevSub2 = docs.prev_submission_2;
+    document.getElementById('prev-subs-body').innerHTML = '<span class="prev-subs-loading">Loading...</span>';
+    document.getElementById('prev-subs-company').textContent = '';
+
+    fetch('/api/writing/prev-submissions/' + mondayId)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.submissions || data.submissions.length === 0) {
+                document.getElementById('prev-subs-body').innerHTML = '<span class="prev-subs-empty">No submissions found for this company.</span>';
+                return;
+            }
+            if (data.company) {
+                document.getElementById('prev-subs-company').textContent = '(' + data.company + ')';
+            }
+            renderPrevSubmissions(mondayId, data.submissions, prevSub1, prevSub2);
+        })
+        .catch(() => {
+            document.getElementById('prev-subs-body').innerHTML = '<span class="prev-subs-empty">Failed to load submissions.</span>';
+        });
+}
+
+// Store submissions data for save lookup
+let _prevSubsData = {};
+
+function renderPrevSubmissions(velmaId, submissions, prevSub1, prevSub2) {
+    const ps1Url = prevSub1 && prevSub1.url;
+    const ps2Url = prevSub2 && prevSub2.url;
+
+    // Index submissions by URL for save lookup
+    _prevSubsData = { velmaId, byUrl: {} };
+    for (const sub of submissions) {
+        if (sub.link) {
+            _prevSubsData.byUrl[sub.link] = sub.link_text || sub.name || '';
+        }
+    }
+
+    let html = '<table class="prev-subs-table"><thead><tr>';
+    html += '<th>Name</th><th>Award</th><th>Category</th><th>Status</th><th>Result</th><th>Slot 1</th><th>Slot 2</th>';
+    html += '</tr></thead><tbody>';
+
+    // "None" row for clearing
+    html += '<tr>';
+    html += '<td colspan="5" style="color:#888;font-style:italic;">None (clear selection)</td>';
+    html += '<td><input type="radio" name="ps-slot1" value="" ' + (!ps1Url ? 'checked' : '') + '></td>';
+    html += '<td><input type="radio" name="ps-slot2" value="" ' + (!ps2Url ? 'checked' : '') + '></td>';
+    html += '</tr>';
+
+    for (const sub of submissions) {
+        const linkUrl = sub.link || '';
+        const isSlot1 = ps1Url && linkUrl && ps1Url === linkUrl;
+        const isSlot2 = ps2Url && linkUrl && ps2Url === linkUrl;
+        const catDisplay = sub.category || '\u2014';
+
+        html += '<tr>';
+        const nameDisplay = (sub.name || '').length > 35 ? sub.name.substring(0, 32) + '...' : (sub.name || '\u2014');
+        html += '<td title="' + escHtml(sub.name || '') + '">' + escHtml(nameDisplay) + '</td>';
+        html += '<td>' + escHtml(sub.award || '\u2014') + '</td>';
+        if (linkUrl) {
+            html += '<td><a href="' + escHtml(linkUrl) + '" target="_blank" rel="noopener">' + escHtml(catDisplay) + '</a></td>';
+        } else {
+            html += '<td>' + escHtml(catDisplay) + '</td>';
+        }
+        html += '<td>' + escHtml(sub.delivery_status || '\u2014') + '</td>';
+        html += '<td>' + escHtml(sub.result_status || '\u2014') + '</td>';
+        if (linkUrl) {
+            html += '<td><input type="radio" name="ps-slot1" value="' + escHtml(linkUrl) + '" ' + (isSlot1 ? 'checked' : '') + '></td>';
+            html += '<td><input type="radio" name="ps-slot2" value="' + escHtml(linkUrl) + '" ' + (isSlot2 ? 'checked' : '') + '></td>';
+        } else {
+            html += '<td></td><td></td>';
+        }
+        html += '</tr>';
+    }
+
+    html += '</tbody></table>';
+    html += '<div class="prev-subs-footer">';
+    html += '<span class="slot-saved" id="slot-saved-msg">Saved</span>';
+    html += '<button class="btn-save-slots" onclick="savePrevSlots()">Save Selections</button>';
+    html += '</div>';
+    document.getElementById('prev-subs-body').innerHTML = html;
+}
+
+// Store the open docs button reference so we can update data-docs after save
+let _docsBtn = null;
+
+function savePrevSlots() {
+    const velmaId = _prevSubsData.velmaId;
+    const btn = document.querySelector('.btn-save-slots');
+    const msg = document.getElementById('slot-saved-msg');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    msg.style.display = 'none';
+
+    const slot1Val = document.querySelector('input[name="ps-slot1"]:checked')?.value || '';
+    const slot2Val = document.querySelector('input[name="ps-slot2"]:checked')?.value || '';
+
+    const slot1Text = slot1Val ? (_prevSubsData.byUrl[slot1Val] || '') : '';
+    const slot2Text = slot2Val ? (_prevSubsData.byUrl[slot2Val] || '') : '';
+
+    // Save both slots in parallel
+    const saves = [
+        fetch('/api/writing/prev-submission', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ monday_id: velmaId, slot: 1, url: slot1Val || null, text: slot1Text }),
+        }).then(r => r.json()),
+        fetch('/api/writing/prev-submission', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ monday_id: velmaId, slot: 2, url: slot2Val || null, text: slot2Text }),
+        }).then(r => r.json()),
+    ];
+
+    Promise.all(saves)
+        .then(results => {
+            btn.disabled = false;
+            btn.textContent = 'Save Selections';
+            const errors = results.filter(r => !r.ok).map(r => r.error);
+            if (errors.length > 0) {
+                alert('Error: ' + errors.join('; '));
+            } else {
+                msg.style.display = 'inline';
+                setTimeout(() => { msg.style.display = 'none'; }, 2000);
+
+                // Update Prev Submission links in the Context section of the docs popup
+                document.querySelectorAll('#docs-body .docs-row').forEach(row => {
+                    const label = row.querySelector('.docs-label')?.textContent.trim();
+                    const valueEl = row.querySelector('.docs-value');
+                    if (!valueEl) return;
+                    let newUrl = null, newText = null;
+                    if (label === 'Prev Submission 1') { newUrl = slot1Val; newText = slot1Text; }
+                    else if (label === 'Prev Submission 2') { newUrl = slot2Val; newText = slot2Text; }
+                    else return;
+                    if (newUrl) {
+                        const display = newText.length > 50 ? newText.substring(0, 47) + '...' : newText;
+                        valueEl.className = 'docs-value';
+                        valueEl.innerHTML = '<a href="' + escHtml(newUrl) + '" target="_blank" rel="noopener">' + escHtml(display) + '</a>';
+                    } else {
+                        valueEl.className = 'docs-value docs-empty';
+                        valueEl.innerHTML = '&mdash;';
+                    }
+                });
+
+                // Update data-docs on the table row so reopening reflects saved state
+                if (_docsBtn) {
+                    const row = _docsBtn.closest('tr');
+                    if (row) {
+                        const docs = JSON.parse(row.dataset.docs);
+                        docs.prev_submission_1 = { url: slot1Val || null, text: slot1Text || null };
+                        docs.prev_submission_2 = { url: slot2Val || null, text: slot2Text || null };
+                        row.dataset.docs = JSON.stringify(docs);
+                    }
+                }
+            }
+        })
+        .catch(err => {
+            btn.disabled = false;
+            btn.textContent = 'Save Selections';
+            alert('Failed to save: ' + err.message);
+        });
+}
+
+function closeDocs() {
+    document.getElementById('docs-overlay').classList.remove('open');
+}
+
+// -- Launch popup --
+
+function openLaunch(btn) {
+    const row = btn.closest('tr');
+    let action = btn.dataset.action;
+    if (!action) {
+        // Multi-action: read from sibling select
+        const sel = row.querySelector('.action-select');
+        action = sel ? sel.value : '';
+    }
+    const name = btn.dataset.name;
+    const guideline = btn.dataset.guideline || 's';
+    const award = btn.dataset.award || '';
+
+    _launchCtx = { name, action, award };
+
+    document.getElementById('launch-title').textContent = action.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    document.getElementById('launch-action-display').textContent = action;
+    document.getElementById('launch-name-display').textContent = name;
+
+    // Set guideline default
+    document.getElementById('launch-guideline').value = guideline;
+
+    // Reset checkboxes and custom
+    document.getElementById('launch-batch').checked = false;
+    document.getElementById('launch-interview-notes').checked = false;
+    document.getElementById('launch-supporting-docs').checked = false;
+    document.getElementById('launch-pre-interview').checked = false;
+    document.getElementById('launch-custom').value = '';
+
+    // Show/hide options based on action
+    const flags = ACTION_FLAGS[action] || [];
+    const allOpts = ['guidelines', 'batch', 'interview_notes', 'supporting_docs', 'pre_interview', 'custom'];
+    for (const opt of allOpts) {
+        const el = document.getElementById('opt-' + opt);
+        if (el) el.style.display = flags.includes(opt) ? '' : 'none';
+    }
+
+    // Reset confirm button
+    const confirmBtn = document.getElementById('launch-confirm');
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = 'Launch';
+
+    document.getElementById('launch-overlay').classList.add('open');
+}
+
+function closeLaunch() {
+    document.getElementById('launch-overlay').classList.remove('open');
+}
+
+function confirmLaunch() {
+    const btn = document.getElementById('launch-confirm');
+    btn.disabled = true;
+    btn.textContent = 'Launching...';
+
+    const payload = {
+        name: _launchCtx.name,
+        action: _launchCtx.action,
+        award: _launchCtx.award || '',
+    };
+
+    const flags = ACTION_FLAGS[_launchCtx.action] || [];
+    if (flags.includes('guidelines')) {
+        const g = document.getElementById('launch-guideline').value;
+        if (g) payload.guideline = g;
+    }
+    if (flags.includes('batch') && document.getElementById('launch-batch').checked) {
+        payload.batch = true;
+    }
+    if (flags.includes('interview_notes') && document.getElementById('launch-interview-notes').checked) {
+        payload.interview_notes = true;
+    }
+    if (flags.includes('supporting_docs') && document.getElementById('launch-supporting-docs').checked) {
+        payload.supporting_docs = true;
+    }
+    if (flags.includes('pre_interview') && document.getElementById('launch-pre-interview').checked) {
+        payload.pre_interview = true;
+    }
+    if (flags.includes('custom')) {
+        const c = document.getElementById('launch-custom').value.trim();
+        if (c) payload.custom = c;
+    }
+
+    fetch('/api/writing/launch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            btn.textContent = 'Launched';
+            setTimeout(closeLaunch, 800);
+        } else {
+            btn.disabled = false;
+            btn.textContent = 'Launch';
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.textContent = 'Launch';
+        alert('Failed to launch: ' + err.message);
+    });
+}
+
+function escHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// -- Column sorting for group tables --
+document.querySelectorAll('.group-table th[data-sort]').forEach(th => {
+    th.addEventListener('click', function() {
+        const table = th.closest('table');
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const colIdx = Array.from(th.parentNode.children).indexOf(th);
+        const sortType = th.dataset.sort;
+
+        const asc = th.classList.contains('sorted-asc');
+        table.querySelectorAll('th').forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+        th.classList.add(asc ? 'sorted-desc' : 'sorted-asc');
+
+        rows.sort((a, b) => {
+            let va, vb;
+            if (sortType === 'date') {
+                va = a.children[colIdx].dataset.ts || '';
+                vb = b.children[colIdx].dataset.ts || '';
+            } else {
+                va = a.children[colIdx].textContent.trim();
+                vb = b.children[colIdx].textContent.trim();
+            }
+            if (va === '\u2014') va = '';
+            if (vb === '\u2014') vb = '';
+            if (sortType === 'num') {
+                va = parseFloat(va) || 0;
+                vb = parseFloat(vb) || 0;
+                return asc ? vb - va : va - vb;
+            }
+            return asc ? vb.localeCompare(va) : va.localeCompare(vb);
+        });
+
+        rows.forEach(r => tbody.appendChild(r));
+    });
+});
+
+// -- Filter dropdowns --
+function populateFilters() {
+    document.querySelectorAll('.group-table-wrap').forEach(wrap => {
+        const table = wrap.querySelector('.group-table');
+        if (!table) return;
+        const selects = wrap.querySelectorAll('.filter-select');
+        selects.forEach(sel => {
+            const colIdx = parseInt(sel.dataset.col);
+            const values = new Set();
+            table.querySelectorAll('tbody tr').forEach(row => {
+                const text = row.children[colIdx].textContent.trim();
+                if (text && text !== '\u2014') values.add(text);
+            });
+            const sorted = Array.from(values).sort();
+            const defaultLabel = sel.options[0].textContent;
+            sel.innerHTML = '<option value="">' + defaultLabel + '</option>';
+            sorted.forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v;
+                opt.textContent = v;
+                sel.appendChild(opt);
+            });
+        });
+    });
+}
+
+function applyFilters(changed) {
+    const wrap = changed.closest('.group-table-wrap');
+    const table = wrap.querySelector('.group-table');
+    const selects = wrap.querySelectorAll('.filter-select');
+
+    const filters = {};
+    selects.forEach(sel => {
+        const v = sel.value;
+        sel.classList.toggle('filter-active', !!v);
+        if (v) filters[parseInt(sel.dataset.col)] = v;
+    });
+
+    table.querySelectorAll('tbody tr').forEach(row => {
+        let show = true;
+        for (const [colIdx, val] of Object.entries(filters)) {
+            const cellText = row.children[colIdx].textContent.trim();
+            if (cellText !== val) { show = false; break; }
+        }
+        row.style.display = show ? '' : 'none';
+    });
+}
+
+function clearFilters(btn) {
+    const wrap = btn.closest('.group-table-wrap');
+    wrap.querySelectorAll('.filter-select').forEach(sel => {
+        sel.value = '';
+        sel.classList.remove('filter-active');
+    });
+    wrap.querySelector('.group-table').querySelectorAll('tbody tr').forEach(row => {
+        row.style.display = '';
+    });
+}
+
+populateFilters();
+
+// -- Auto-refresh polling --
+let _autoRefreshTimer = null;
+
+function toggleAutoRefresh(checkbox) {
+    if (checkbox.checked) {
+        doAutoRefresh();
+        _autoRefreshTimer = setInterval(doAutoRefresh, 120000); // 2 minutes
+    } else {
+        if (_autoRefreshTimer) {
+            clearInterval(_autoRefreshTimer);
+            _autoRefreshTimer = null;
+        }
+    }
+}
+
+function doAutoRefresh() {
+    const btn = document.querySelector('.btn-refresh');
+    if (btn && !btn.classList.contains('htmx-request')) {
+        htmx.trigger(btn, 'click');
+    }
+}
+
+// -- Velma process completion polling --
+// Checks every 5s if a velma process has finished; triggers Quick Refresh when it has
+let _velmaDoneTimer = setInterval(async () => {
+    try {
+        const resp = await fetch('/api/writing/velma-done');
+        const data = await resp.json();
+        if (data.refresh) {
+            doAutoRefresh();
+        }
+    } catch (e) { /* ignore */ }
+}, 5000);
+
+// Default sort: Updated column descending (newest first)
+document.querySelectorAll('.group-table').forEach(table => {
+    const ths = table.querySelectorAll('thead th');
+    const updatedTh = Array.from(ths).find(th => th.dataset.sort === 'date');
+    if (!updatedTh) return;
+    const colIdx = Array.from(ths).indexOf(updatedTh);
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort((a, b) => {
+        const va = a.children[colIdx].dataset.ts || '';
+        const vb = b.children[colIdx].dataset.ts || '';
+        return vb.localeCompare(va);
+    });
+    rows.forEach(r => tbody.appendChild(r));
+    updatedTh.classList.add('sorted-desc');
+});
+</script>
 {% endblock %}

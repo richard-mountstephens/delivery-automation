@@ -1,20 +1,58 @@
-"""Claude CLI subprocess wrapper — uses Max subscription via `claude -p`."""
+"""Claude API adapter — uses Anthropic SDK for delivery analysis."""
 
 import json
 import logging
-import subprocess
-import tempfile
-from typing import AsyncGenerator
+import os
+import time
+
+from anthropic import Anthropic, RateLimitError
 
 logger = logging.getLogger(__name__)
 
-CLAUDE_CMD = "claude"
+MODEL = "claude-sonnet-4-20250514"
+MAX_TOKENS = 8192
+MAX_RETRIES = 3
+RETRY_DELAY = 60
+
+DATA_TOOLS = [
+    {
+        "name": "get_all_active_submissions",
+        "description": (
+            "Fetch the full active submissions dataset from the delivery board. "
+            "Use this when the user's question goes beyond the alert data already provided — "
+            "for example: questions about all submissions (not just those with alerts), "
+            "target finish dates, delivery status breakdowns, writer workload across all items, "
+            "award/category counts, or any question where the alert data alone is insufficient. "
+            "Do NOT call this for questions that can be answered from the alert data already in your context."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Brief reason why alert data is insufficient for this question",
+                },
+            },
+            "required": ["reason"],
+        },
+    },
+]
+
+
+def _get_client() -> Anthropic:
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY environment variable not set. "
+            "Get your key from https://console.anthropic.com/"
+        )
+    return Anthropic(api_key=api_key)
 
 
 def analyse(alerts: list[dict], rules_context: str) -> dict:
-    """Run AI analysis on alert items using Claude CLI.
+    """Run AI analysis on alert items using the Anthropic API.
 
-    Returns dict with 'summary', 'insights' (list), and 'session_id'.
+    Returns dict with 'summary', 'insights' (list), and 'patterns'.
     """
     alerts_json = json.dumps(alerts, indent=2, default=str)
 
@@ -73,106 +111,170 @@ RULES:
 - Keep total briefing under 300 words.
 - IMPORTANT: Each item includes pre-calculated business_days_to_close, business_days_to_target, and business_days_to_extension. These account for weekends and Australian public holidays. Always use these numbers when describing urgency — say "X business days" not "X days". For example, Apr 7 from Apr 2 is 1 business day (Easter weekend Apr 3-6), not 5 days."""
 
-    # Write rules to temp file for --append-system-prompt-file
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        f.write(rules_context)
-        rules_file = f.name
-
     try:
-        result = subprocess.run(
-            [
-                CLAUDE_CMD, "-p", prompt,
-                "--append-system-prompt-file", rules_file,
-                "--output-format", "json",
-                "--max-turns", "1",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-    except FileNotFoundError:
-        logger.error("claude CLI not found — is Claude Code installed?")
-        return {"error": "Claude CLI not found", "insights": [], "summary": ""}
-    except subprocess.TimeoutExpired:
-        logger.error("Claude analysis timed out after 120s")
-        return {"error": "Analysis timed out", "insights": [], "summary": ""}
+        client = _get_client()
+    except RuntimeError as e:
+        logger.error(str(e))
+        return {"error": str(e), "insights": [], "summary": ""}
 
-    if result.returncode != 0:
-        logger.error("Claude CLI error: %s", result.stderr)
-        return {"error": result.stderr.strip(), "insights": [], "summary": ""}
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client.messages.create(
+                model=MODEL,
+                max_tokens=MAX_TOKENS,
+                system=rules_context,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            break
+        except RateLimitError:
+            if attempt == MAX_RETRIES - 1:
+                logger.error("Rate limited after %d retries", MAX_RETRIES)
+                return {"error": "Rate limited — try again shortly", "insights": [], "summary": ""}
+            wait_time = RETRY_DELAY * (attempt + 1)
+            logger.warning("Rate limited. Waiting %ds before retry %d/%d", wait_time, attempt + 2, MAX_RETRIES)
+            time.sleep(wait_time)
+        except Exception as e:
+            logger.error("Anthropic API error: %s", e)
+            return {"error": str(e), "insights": [], "summary": ""}
 
-    # Parse the JSON output from claude CLI
-    try:
-        output = json.loads(result.stdout)
-        # claude -p --output-format json wraps in {result, session_id, ...}
-        session_id = output.get("session_id")
-        result_text = output.get("result", "")
+    result_text = ""
+    for block in response.content:
+        if block.type == "text":
+            result_text = block.text
+            break
 
-        # The result text contains our JSON — extract it
-        analysis = _extract_json(result_text)
-        if analysis:
-            analysis["session_id"] = session_id
-            return analysis
+    analysis = _extract_json(result_text)
+    if analysis:
+        return analysis
 
-        # If no structured JSON, return the raw text as summary
-        return {
-            "summary": result_text,
-            "insights": [],
-            "session_id": session_id,
-        }
-
-    except json.JSONDecodeError:
-        logger.warning("Could not parse Claude output as JSON")
-        return {
-            "summary": result.stdout.strip(),
-            "insights": [],
-            "session_id": None,
-        }
+    return {"summary": result_text, "insights": []}
 
 
-def chat_sync(message: str, session_id: str | None = None) -> dict:
-    """Send a chat message to Claude, optionally resuming a session.
+# Session-keyed chat histories (in-memory, single-server)
+_chat_sessions: dict[str, list[dict]] = {}
+_MAX_SESSIONS = 20
+_MAX_MESSAGES_PER_SESSION = 50
 
-    Returns dict with 'text' and 'session_id'.
+
+def _call_api(client, system_prompt, messages, tools=None):
+    """Call the Claude API with retry logic. Returns the response."""
+    kwargs = dict(model=MODEL, max_tokens=MAX_TOKENS, system=system_prompt, messages=messages)
+    if tools:
+        kwargs["tools"] = tools
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            return client.messages.create(**kwargs)
+        except RateLimitError:
+            if attempt == MAX_RETRIES - 1:
+                raise
+            wait_time = RETRY_DELAY * (attempt + 1)
+            logger.warning("Rate limited. Waiting %ds before retry %d/%d", wait_time, attempt + 2, MAX_RETRIES)
+            time.sleep(wait_time)
+
+
+def chat_sync(
+    message: str,
+    alert_context: str = "",
+    rules_context: str = "",
+    fetch_full_data: callable = None,
+    session_id: str = "default",
+) -> dict:
+    """Send a chat message with delivery alert data context.
+
+    Alert data is always included. If Claude needs broader data, it calls the
+    get_all_active_submissions tool and fetch_full_data() provides it.
+
+    Returns dict with 'text'.
     """
-    cmd = [CLAUDE_CMD, "-p", message, "--output-format", "json"]
-    if session_id:
-        cmd.extend(["--resume", session_id])
+    # Evict oldest session if at capacity
+    if session_id not in _chat_sessions and len(_chat_sessions) >= _MAX_SESSIONS:
+        oldest = next(iter(_chat_sessions))
+        del _chat_sessions[oldest]
+    history = _chat_sessions.setdefault(session_id, [])
+    while len(history) > _MAX_MESSAGES_PER_SESSION:
+        history.pop(0)
+
+    system_prompt = f"""You are the RBD Delivery Manager AI Assistant. You help the delivery manager understand their active submission alerts, writer workloads, deadlines, and delivery pipeline.
+
+MANAGEMENT RULES AND GUIDANCE:
+{rules_context}
+
+CURRENT ALERT DATA (submissions with active alerts only):
+{alert_context}
+
+The alert data above covers submissions that have date, writer, metrics, or asset alerts. If the user asks about ALL active submissions (e.g. target finish dates, delivery status breakdowns, total counts, writer workload beyond alert items), use the get_all_active_submissions tool to fetch the full dataset.
+
+Keep responses concise and actionable. Use markdown formatting (bold, lists, tables) for clarity. Always cite specific names, dates, and counts from the data. Use "business days" when discussing deadlines (the data includes pre-calculated business days that exclude weekends and Australian public holidays)."""
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-    except FileNotFoundError:
-        return {"text": "Error: Claude CLI not found", "session_id": session_id}
-    except subprocess.TimeoutExpired:
-        return {"text": "Error: Response timed out", "session_id": session_id}
+        client = _get_client()
+    except RuntimeError as e:
+        return {"text": str(e)}
 
-    if result.returncode != 0:
-        return {"text": f"Error: {result.stderr.strip()}", "session_id": session_id}
+    history.append({"role": "user", "content": message})
 
     try:
-        output = json.loads(result.stdout)
-        return {
-            "text": output.get("result", ""),
-            "session_id": output.get("session_id", session_id),
-        }
-    except json.JSONDecodeError:
-        return {"text": result.stdout.strip(), "session_id": session_id}
+        response = _call_api(client, system_prompt, history, tools=DATA_TOOLS if fetch_full_data else None)
+    except RateLimitError:
+        history.pop()
+        return {"text": "Rate limited — try again shortly."}
+    except Exception as e:
+        history.pop()
+        return {"text": f"Error: {e}"}
+
+    # Check if Claude wants the full submissions data
+    tool_use_block = None
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "get_all_active_submissions":
+            tool_use_block = block
+            break
+
+    if tool_use_block and fetch_full_data:
+        logger.info("Chat requested full submissions data: %s", tool_use_block.input.get("reason", ""))
+
+        # Add Claude's tool_use response to history
+        history.append({"role": "assistant", "content": response.content})
+
+        # Fetch full data and send as tool_result
+        full_data = fetch_full_data()
+        history.append({
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool_use_block.id,
+                "content": full_data,
+            }],
+        })
+
+        # Get Claude's final answer with the full data
+        try:
+            response = _call_api(client, system_prompt, history)
+        except Exception as e:
+            return {"text": f"Error: {e}"}
+
+    # Extract text from final response
+    result_text = ""
+    for block in response.content:
+        if block.type == "text":
+            result_text += block.text
+
+    history.append({"role": "assistant", "content": result_text})
+    return {"text": result_text}
+
+
+def reset_chat(session_id: str = "default") -> None:
+    """Clear chat history for a session."""
+    _chat_sessions.pop(session_id, None)
 
 
 def _extract_json(text: str) -> dict | None:
     """Extract JSON object from text that may contain markdown fences or prose."""
-    # Try the whole thing first
     try:
         return json.loads(text)
     except (json.JSONDecodeError, TypeError):
         pass
 
-    # Try to find JSON within markdown fences
     if "```json" in text:
         start = text.index("```json") + 7
         end = text.index("```", start)
@@ -181,7 +283,6 @@ def _extract_json(text: str) -> dict | None:
         except (json.JSONDecodeError, ValueError):
             pass
 
-    # Try to find a JSON object in the text
     for i, ch in enumerate(text):
         if ch == "{":
             depth = 0

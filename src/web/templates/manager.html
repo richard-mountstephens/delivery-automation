@@ -106,7 +106,6 @@ Assets waiting for more than 2 days during post-review ("{{ item.delivery_status
 <style>
     .manager-layout { display: flex; gap: 20px; min-height: calc(100vh - 120px); }
     .dashboard-panel { flex: 1; min-width: 0; }
-    .chat-panel { width: 480px; flex-shrink: 0; display: flex; flex-direction: column; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
 
     .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
     .page-header h2 { font-size: 20px; font-weight: 700; color: #1a1a2e; }
@@ -225,7 +224,7 @@ Assets waiting for more than 2 days during post-review ("{{ item.delivery_status
     /* Detail popup card */
     .detail-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.3); z-index: 200; }
     .detail-overlay.open { display: flex; align-items: center; justify-content: center; }
-    .detail-card { background: white; border-radius: 12px; padding: 24px; width: 520px; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+    .detail-card { background: white; border-radius: 12px; padding: 24px; width: 720px; max-width: 95vw; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
     .detail-card h3 { font-size: 16px; font-weight: 700; color: #1a1a2e; margin-bottom: 16px; line-height: 1.3; }
     .detail-card .detail-grid { display: grid; grid-template-columns: 120px 1fr; gap: 8px 12px; font-size: 13px; }
     .detail-card .detail-label { color: #888; font-weight: 600; }
@@ -250,25 +249,42 @@ Assets waiting for more than 2 days during post-review ("{{ item.delivery_status
 
     .all-clear { text-align: center; padding: 24px; color: #0a7c3e; font-weight: 600; }
 
-    /* Chat panel */
-    .chat-header { padding: 12px 16px; border-bottom: 1px solid #e9ecef; font-size: 14px; font-weight: 700; color: #1a1a2e; }
-    .chat-messages { flex: 1; overflow-y: auto; padding: 12px 16px; font-size: 13px; line-height: 1.5; color: #333; }
-    .chat-messages .msg { margin-bottom: 12px; }
-    .chat-messages .msg.user { color: #662d91; font-weight: 600; }
-    .chat-messages .msg.assistant { color: #333; line-height: 1.6; }
-    .chat-messages .msg.assistant p { margin: 0 0 8px 0; }
-    .chat-messages .msg.assistant strong { color: #1a1a2e; }
-    .chat-messages .msg.system { color: #888; font-style: italic; font-size: 12px; }
-    .chat-input-area { padding: 12px 16px; border-top: 1px solid #e9ecef; display: flex; gap: 8px; }
-    .chat-input { flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; font-family: inherit; resize: none; }
-    .chat-input:focus { outline: none; border-color: #662d91; }
-    .chat-send { background: #662d91; color: white; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+    /* AI Chat toggle button */
+    .chat-toggle-btn { background: #0a7c3e; color: white; border: none; padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 600; }
+    .chat-toggle-btn:hover { background: #0d9e4e; }
+    .chat-toggle-btn.active { background: #065a2c; }
+    /* AI Chat drawer */
+    .chat-drawer { position: fixed; right: -440px; top: 0; bottom: 0; width: 420px; background: white; box-shadow: -4px 0 20px rgba(0,0,0,0.12); display: flex; flex-direction: column; z-index: 1100; transition: right 0.25s ease; }
+    .chat-drawer.open { right: 0; }
+    .chat-drawer-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid #eee; background: #f8f8fc; }
+    .chat-drawer-title { font-size: 15px; font-weight: 700; color: #1a1a2e; }
+    .chat-reset-btn { background: #4a4a7e; color: white; border: none; padding: 4px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    .chat-reset-btn:hover { background: #5a5a9e; }
+    .chat-close-btn { background: none; border: none; font-size: 22px; cursor: pointer; color: #999; padding: 0 4px; line-height: 1; }
+    .chat-close-btn:hover { color: #333; }
+    .chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .chat-messages .chat-msg { padding: 10px 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; max-width: 95%; word-wrap: break-word; }
+    .chat-messages .chat-msg.system { background: #f0f4ff; color: #4a4a7e; font-style: italic; align-self: center; text-align: center; max-width: 100%; }
+    .chat-messages .chat-msg.user { background: #662d91; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
+    .chat-messages .chat-msg.assistant { background: #f5f5f5; color: #1a1a2e; align-self: flex-start; border-bottom-left-radius: 2px; }
+    .chat-messages .chat-msg.assistant strong { color: #4a4a7e; }
+    .chat-messages .chat-msg.assistant ul, .chat-messages .chat-msg.assistant ol { margin: 6px 0; padding-left: 18px; }
+    .chat-messages .chat-msg.assistant li { margin: 2px 0; }
+    .chat-messages .chat-msg.assistant table { border-collapse: collapse; margin: 8px 0; font-size: 12px; width: 100%; }
+    .chat-messages .chat-msg.assistant table th, .chat-messages .chat-msg.assistant table td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; }
+    .chat-messages .chat-msg.assistant table th { background: #f0f0f0; font-weight: 600; }
+    .chat-messages .chat-msg.error { background: #fff0f0; color: #c62828; }
+    .chat-messages .chat-msg.loading { color: #999; font-style: italic; }
+    .chat-input-area { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #eee; background: #fafafa; }
+    .chat-input-area textarea { flex: 1; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; font-family: inherit; resize: none; }
+    .chat-input-area textarea:focus { outline: none; border-color: #4a4a7e; }
+    .chat-send { background: #662d91; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 600; align-self: flex-end; }
     .chat-send:hover { background: #7b3aab; }
-    .chat-send:disabled { opacity: 0.5; cursor: not-allowed; }
+    .chat-send:disabled { background: #ccc; cursor: not-allowed; }
 </style>
 
 <div class="page-header">
-    <h2>Co-ordinator</h2>
+    <h2>AI Co-ordinator</h2>
     <div class="header-actions">
         <span class="sync-status">
             {% if last_sync %}Last synced: {{ last_sync }}{% else %}Not synced yet{% endif %}
@@ -288,6 +304,7 @@ Assets waiting for more than 2 days during post-review ("{{ item.delivery_status
         <button style="background:none;border:1px solid #ddd;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;color:#888;" onclick="fetch('/api/clear-rules-cache',{method:'POST'}).then(()=>this.textContent='Cleared!').catch(()=>this.textContent='Error')" title="Force re-read of Google Doc rules on next Analyse">
             Reload Rules
         </button>
+        <button class="chat-toggle-btn" id="chat-toggle-btn" onclick="toggleChatDrawer()">AI Chat</button>
     </div>
 </div>
 
@@ -445,6 +462,12 @@ Assets waiting for more than 2 days during post-review ("{{ item.delivery_status
                         <div style="height:300px;"><canvas id="chart-by-writer"></canvas></div>
                     </div>
 
+                    <!-- Chart: By Award stacked by Date Alert (horizontal bar) -->
+                    <div style="background:white; border:1px solid #e9ecef; border-radius:8px; padding:16px;">
+                        <h4 style="font-size:13px; font-weight:700; color:#1a1a2e; margin:0 0 12px;">Date Alerts by Award</h4>
+                        <div style="height:300px;"><canvas id="chart-date-alerts"></canvas></div>
+                    </div>
+
                     <!-- Chart: Days Since for "With Client" items (horizontal bar, stacked by client) -->
                     <div style="background:white; border:1px solid #e9ecef; border-radius:8px; padding:16px;">
                         <h4 style="font-size:13px; font-weight:700; color:#1a1a2e; margin:0 0 12px;">Days Since — With Client</h4>
@@ -458,10 +481,49 @@ Assets waiting for more than 2 days during post-review ("{{ item.delivery_status
                     </div>
 
                     <!-- Chart: Delivery Status x Asset Status (vertical bar, stacked) -->
-                    <div style="background:white; border:1px solid #e9ecef; border-radius:8px; padding:16px; grid-column: 1 / -1;">
+                    <div style="background:white; border:1px solid #e9ecef; border-radius:8px; padding:16px;">
                         <h4 style="font-size:13px; font-weight:700; color:#1a1a2e; margin:0 0 12px;">Asset Status by Delivery Status</h4>
                         <div style="height:300px;"><canvas id="chart-assets"></canvas></div>
                     </div>
+
+                </div>
+
+                <!-- Chart: Submitted by Month (full-width, own row) -->
+                <div style="margin-top:16px; background:white; border:1px solid #e9ecef; border-radius:8px; padding:16px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+                        <h4 style="font-size:14px; font-weight:700; color:#1a1a2e; margin:0;">Submitted by Month</h4>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <button id="submitted-group-toggle" onclick="toggleSubmittedGroup()" style="padding:3px 10px; border:1px solid #ddd; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer; background:#f8f9fa; color:#555;">By Award</button>
+                            <label style="font-size:11px; color:#888; font-weight:600;">From:</label>
+                            <input type="month" id="submitted-from" style="padding:3px 6px; border:1px solid #ddd; border-radius:4px; font-size:11px;" onchange="updateSubmittedChart()">
+                            <label style="font-size:11px; color:#888; font-weight:600;">To:</label>
+                            <input type="month" id="submitted-to" style="padding:3px 6px; border:1px solid #ddd; border-radius:4px; font-size:11px;" onchange="updateSubmittedChart()">
+                        </div>
+                    </div>
+                    <div style="height:300px;"><canvas id="chart-submitted-month"></canvas></div>
+                </div>
+
+                <!-- Chart: Created by Month (full-width, own row) -->
+                <div style="margin-top:16px; background:white; border:1px solid #e9ecef; border-radius:8px; padding:16px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+                        <h4 style="font-size:14px; font-weight:700; color:#1a1a2e; margin:0;">Created by Month</h4>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <button id="created-group-toggle" onclick="toggleCreatedGroup()" style="padding:3px 10px; border:1px solid #ddd; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer; background:#f8f9fa; color:#555;">By Award</button>
+                            <label style="font-size:11px; color:#888; font-weight:600;">From:</label>
+                            <input type="month" id="created-from" style="padding:3px 6px; border:1px solid #ddd; border-radius:4px; font-size:11px;" onchange="updateCreatedChart()">
+                            <label style="font-size:11px; color:#888; font-weight:600;">To:</label>
+                            <input type="month" id="created-to" style="padding:3px 6px; border:1px solid #ddd; border-radius:4px; font-size:11px;" onchange="updateCreatedChart()">
+                        </div>
+                    </div>
+                    <div style="height:300px;"><canvas id="chart-created-month"></canvas></div>
+                </div>
+
+                <!-- Chart: Cumulative Created vs Submitted by Calendar Year -->
+                <div style="margin-top:16px; background:white; border:1px solid #e9ecef; border-radius:8px; padding:16px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+                        <h4 style="font-size:14px; font-weight:700; color:#1a1a2e; margin:0;">Cumulative Created vs Submitted — 2025 &amp; 2026</h4>
+                    </div>
+                    <div style="height:350px;"><canvas id="chart-cumulative"></canvas></div>
                 </div>
 
                 <div class="summary-tables">
@@ -505,16 +567,25 @@ Assets waiting for more than 2 days during post-review ("{{ item.delivery_status
 
     </div>
 
-    <!-- Chat Panel -->
-    <div class="chat-panel">
-        <div class="chat-header">AI Assistant</div>
-        <div class="chat-messages" id="chat-messages">
-            <div class="msg system">Click "Analyse" to get AI-powered insights, or ask a question below.</div>
+
+</div>
+
+<!-- AI Chat Drawer -->
+<div id="chat-drawer" class="chat-drawer">
+    <div class="chat-drawer-header">
+        <span class="chat-drawer-title">AI Delivery Assistant</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+            <button onclick="resetChat()" class="chat-reset-btn" title="New conversation">New</button>
+            <button onclick="toggleChatDrawer()" class="chat-close-btn">&times;</button>
         </div>
-        <div class="chat-input-area">
-            <textarea class="chat-input" id="chat-input" rows="2" placeholder="Ask me about the pipeline..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea>
-            <button class="chat-send" onclick="sendChat()" id="chat-send">Send</button>
-        </div>
+    </div>
+    <div class="chat-messages" id="chat-messages">
+        <div class="chat-msg system">Click "Analyse" to get AI-powered insights, or ask a question below.</div>
+    </div>
+    <div class="chat-input-area">
+        <textarea id="chat-input" rows="2" placeholder="Ask about the delivery pipeline..."
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea>
+        <button class="chat-send" onclick="sendChat()" id="chat-send">Send</button>
     </div>
 </div>
 </div>
@@ -672,14 +743,56 @@ function formatAnalysis(summary, patterns) {
 function addMessage(role, text) {
     const messages = document.getElementById('chat-messages');
     const div = document.createElement('div');
-    div.className = 'msg ' + role;
-    div.textContent = text;
+    div.className = 'chat-msg ' + role;
+    if (role === 'assistant' && text) {
+        div.innerHTML = renderChatMarkdown(text);
+    } else {
+        div.textContent = text;
+    }
     messages.appendChild(div);
     messages.scrollTop = messages.scrollHeight;
     return div;
 }
 
+function renderChatMarkdown(text) {
+    let html = text
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>');
+    // Tables
+    html = html.replace(/^(\|.+\|)\n(\|[-| :]+\|)\n((?:\|.+\|\n?)+)/gm, (match, header, sep, body) => {
+        const headers = header.split('|').filter(c => c.trim()).map(c => `<th>${c.trim()}</th>`).join('');
+        const rows = body.trim().split('\n').map(row => {
+            const cells = row.split('|').filter(c => c.trim()).map(c => `<td>${c.trim()}</td>`).join('');
+            return `<tr>${cells}</tr>`;
+        }).join('');
+        return `<table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table>`;
+    });
+    html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+    html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+    html = html.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
+    html = html.replace(/\n\n/g, '<br><br>').replace(/\n/g, '<br>');
+    html = html.replace(/<br><\/li>/g, '</li>').replace(/<br><\/ul>/g, '</ul>');
+    return html;
+}
+
+function toggleChatDrawer() {
+    const drawer = document.getElementById('chat-drawer');
+    const btn = document.getElementById('chat-toggle-btn');
+    drawer.classList.toggle('open');
+    btn.classList.toggle('active');
+}
+
+function resetChat() {
+    fetch('/api/chat/reset', { method: 'POST' });
+    const msgs = document.getElementById('chat-messages');
+    msgs.innerHTML = '<div class="chat-msg system">Click "Analyse" to get AI-powered insights, or ask a question below.</div>';
+}
+
 function runAnalysis() {
+    // Open chat drawer if not already open
+    const drawer = document.getElementById('chat-drawer');
+    if (!drawer.classList.contains('open')) toggleChatDrawer();
     const btn = document.getElementById('btn-analyse');
     btn.disabled = true;
     btn.textContent = 'Analysing...';
@@ -720,21 +833,29 @@ function sendChat() {
     const sendBtn = document.getElementById('chat-send');
     sendBtn.disabled = true;
     const responseDiv = addMessage('assistant', '');
+    let fullText = '';
     fetch('/api/chat', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ message }) })
     .then(response => {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
+        let buffer = '';
         function readStream() {
             return reader.read().then(({ done, value }) => {
                 if (done) { sendBtn.disabled = false; return; }
-                const text = decoder.decode(value, { stream: true });
-                for (const line of text.split('\n')) {
-                    if (line.startsWith('data: ')) {
-                        const data = line.slice(6);
-                        if (data === '[DONE]') { sendBtn.disabled = false; return; }
-                        try { const p = JSON.parse(data); if (p.text) responseDiv.textContent += p.text; }
-                        catch { if (data.trim()) responseDiv.textContent += data; }
-                    }
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    const data = line.slice(6);
+                    if (data === '[DONE]') { sendBtn.disabled = false; return; }
+                    try {
+                        const p = JSON.parse(data);
+                        if (p.text) {
+                            fullText += p.text;
+                            responseDiv.innerHTML = renderChatMarkdown(fullText);
+                        }
+                    } catch (e) { /* skip malformed */ }
                 }
                 document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
                 return readStream();
@@ -864,6 +985,7 @@ function initChart() {
     });
 }
 initChart();
+attachChartClick('status-chart', statusChart, 'delivery_status', 'award');
 
 // -- Delivery status colors for stacking ------------------------------------
 const STATUS_COLORS = {
@@ -990,35 +1112,98 @@ function attachChartClick(canvasId, chart, groupField, stackField) {
 
 function showChartPopup(groupValue, stackValue, items) {
     const card = document.getElementById('detail-card');
-    let rows = items.map(i =>
-        `<tr>
-            <td style="font-size:12px;padding:4px 8px;">${i.name || '—'}</td>
-            <td style="font-size:12px;padding:4px 8px;">${i.award || '—'}</td>
-            <td style="font-size:12px;padding:4px 8px;">${i.category || '—'}</td>
-            <td style="font-size:12px;padding:4px 8px;">${i.writer || '—'}</td>
-            <td style="font-size:12px;padding:4px 8px;">${i.close_date || '—'}</td>
-            <td style="font-size:12px;padding:4px 8px;">${i.target_finish_date || '—'}</td>
-        </tr>`
-    ).join('');
+    const columns = [
+        { key: 'name', label: 'Name' },
+        { key: 'award', label: 'Award' },
+        { key: 'category', label: 'Category' },
+        { key: 'writer', label: 'Writer' },
+        { key: 'close_date', label: 'Close' },
+        { key: 'target_finish_date', label: 'Target' },
+    ];
 
-    card.innerHTML = `
-        <button class="detail-close" onclick="closeDetail()">&times;</button>
-        <h3>${groupValue} — ${stackValue}</h3>
-        <p style="font-size:13px;color:#666;margin-bottom:12px;">${items.length} submission${items.length > 1 ? 's' : ''}</p>
-        <table style="width:100%;border-collapse:collapse;">
-            <thead>
-                <tr style="border-bottom:2px solid #eee;">
-                    <th style="text-align:left;font-size:11px;color:#888;padding:4px 8px;">Name</th>
-                    <th style="text-align:left;font-size:11px;color:#888;padding:4px 8px;">Award</th>
-                    <th style="text-align:left;font-size:11px;color:#888;padding:4px 8px;">Category</th>
-                    <th style="text-align:left;font-size:11px;color:#888;padding:4px 8px;">Writer</th>
-                    <th style="text-align:left;font-size:11px;color:#888;padding:4px 8px;">Close</th>
-                    <th style="text-align:left;font-size:11px;color:#888;padding:4px 8px;">Target</th>
-                </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-        </table>
-    `;
+    let sortCol = null, sortAsc = true;
+    const filters = {};
+    columns.forEach(c => filters[c.key] = '');
+
+    function render() {
+        let filtered = items.filter(item =>
+            columns.every(c => {
+                const f = filters[c.key];
+                if (!f) return true;
+                return (item[c.key] || '').toLowerCase().includes(f.toLowerCase());
+            })
+        );
+
+        if (sortCol !== null) {
+            filtered.sort((a, b) => {
+                const va = (a[sortCol] || '').toLowerCase();
+                const vb = (b[sortCol] || '').toLowerCase();
+                if (va < vb) return sortAsc ? -1 : 1;
+                if (va > vb) return sortAsc ? 1 : -1;
+                return 0;
+            });
+        }
+
+        const arrow = col => col === sortCol ? (sortAsc ? ' ▲' : ' ▼') : '';
+        const thStyle = 'text-align:left;font-size:11px;color:#888;padding:4px 8px;cursor:pointer;user-select:none;white-space:nowrap;';
+        const filterStyle = 'width:100%;font-size:11px;padding:2px 4px;border:1px solid #ddd;border-radius:3px;box-sizing:border-box;';
+
+        const rows = filtered.map(i =>
+            `<tr>${columns.map(c =>
+                `<td style="font-size:12px;padding:4px 8px;">${i[c.key] || '—'}</td>`
+            ).join('')}</tr>`
+        ).join('');
+
+        card.innerHTML = `
+            <button class="detail-close" onclick="closeDetail()">&times;</button>
+            <h3>${groupValue} — ${stackValue}</h3>
+            <p style="font-size:13px;color:#666;margin-bottom:12px;">${filtered.length} of ${items.length} submission${items.length !== 1 ? 's' : ''}</p>
+            <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                    <tr style="border-bottom:2px solid #eee;">
+                        ${columns.map(c => `<th style="${thStyle}" data-col="${c.key}">${c.label}${arrow(c.key)}</th>`).join('')}
+                    </tr>
+                    <tr style="border-bottom:1px solid #eee;">
+                        ${columns.map(c => `<td style="padding:3px 8px;"><input type="text" placeholder="Filter…" data-filter="${c.key}" value="${filters[c.key]}" style="${filterStyle}"></td>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+
+        card.querySelectorAll('th[data-col]').forEach(th => {
+            th.onclick = () => {
+                const col = th.dataset.col;
+                if (sortCol === col) sortAsc = !sortAsc;
+                else { sortCol = col; sortAsc = true; }
+                render();
+            };
+        });
+
+        card.querySelectorAll('input[data-filter]').forEach(inp => {
+            inp.oninput = () => {
+                filters[inp.dataset.filter] = inp.value;
+                render();
+            };
+            // Restore focus to active filter input after re-render
+            if (document.activeElement === null || document.activeElement === document.body) {
+                const prev = Object.entries(filters).find(([, v]) => v);
+                if (prev) {
+                    const el = card.querySelector(`input[data-filter="${prev[0]}"]`);
+                    if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; }
+                }
+            }
+        });
+
+        // Restore focus to the filter that was last typed in
+        const activeFilter = Object.keys(filters).find(k => filters[k]);
+        if (activeFilter) {
+            const el = card.querySelector(`input[data-filter="${activeFilter}"]`);
+            if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; }
+        }
+    }
+
+    render();
     document.getElementById('detail-overlay').classList.add('open');
 }
 
@@ -1030,7 +1215,19 @@ attachChartClick('chart-by-award', awardChart, 'award', 'delivery_status');
 const writerChart = makeChart('chart-by-writer', 'horizontal', getFilteredItems(), 'writer', 'delivery_status', STATUS_COLORS, 'count');
 attachChartClick('chart-by-writer', writerChart, 'writer', 'delivery_status');
 
-// 3. Days Since for "With Client" items — horizontal bar, days_since on Y axis, stacked by client
+// 3. Date Alerts by Award — horizontal bar, stacked by date alert value
+const DATE_ALERT_COLORS = {
+    'Target Date Issue (Pre-Review)': '#c62828',
+    'Target Date Issue (Post-Review)': '#e53935',
+    'Target Date Blank': '#66bb6a',
+    'Target after close': '#a5d6a7',
+};
+const dateAlertChart = makeChart('chart-date-alerts', 'horizontal',
+    getFilteredItems().filter(i => i.date_alert),
+    'award', 'date_alert', DATE_ALERT_COLORS, 'count');
+attachChartClick('chart-date-alerts', dateAlertChart, 'award', 'date_alert');
+
+// 4. Days Since for "With Client" items — horizontal bar, days_since on Y axis, stacked by client
 (function() {
     const ctx = document.getElementById('chart-days-since');
     if (!ctx) return;
@@ -1107,5 +1304,314 @@ attachChartClick('chart-metrics', metricsChart, 'delivery_status', 'metrics_stat
 // 5. Asset Status by Delivery Status — vertical bar, stacked (clickable)
 const assetsChart = makeChart('chart-assets', 'vertical', getFilteredItems().filter(i => i.asset_status), 'delivery_status', 'asset_status', ASSET_COLORS, 'status');
 attachChartClick('chart-assets', assetsChart, 'delivery_status', 'asset_status');
+
+// -- Monthly stacked charts with date filtering ------------------------------
+const SUBMITTED_ITEMS = {{ submitted_items_json | safe }};
+
+function buildMonthlyData(items, dateField, fromMonth, toMonth) {
+    const monthMap = {};
+    const awardSet = new Set();
+    for (const item of items) {
+        const raw = item[dateField];
+        if (!raw) continue;
+        const month = raw.slice(0, 7); // YYYY-MM
+        if (fromMonth && month < fromMonth) continue;
+        if (toMonth && month > toMonth) continue;
+        const award = item.award || 'Unknown';
+        if (!monthMap[month]) monthMap[month] = {};
+        monthMap[month][award] = (monthMap[month][award] || 0) + 1;
+        awardSet.add(award);
+    }
+
+    const monthKeys = Object.keys(monthMap).sort();
+    const awardTotals = {};
+    for (const a of awardSet) awardTotals[a] = 0;
+    for (const counts of Object.values(monthMap)) {
+        for (const [a, c] of Object.entries(counts)) awardTotals[a] += c;
+    }
+    const awards = Array.from(awardSet).sort((a, b) => (awardTotals[b] || 0) - (awardTotals[a] || 0));
+
+    const displayLabels = monthKeys.map(m => {
+        const [y, mo] = m.split('-');
+        return new Date(parseInt(y), parseInt(mo) - 1).toLocaleString('default', { month: 'short', year: 'numeric' });
+    });
+
+    const datasets = awards.map((award, i) => ({
+        label: award,
+        data: monthKeys.map(m => (monthMap[m] || {})[award] || 0),
+        backgroundColor: AWARD_COLORS[i % AWARD_COLORS.length],
+    }));
+
+    return { monthKeys, displayLabels, datasets };
+}
+
+// Mortgage vs Non-Mortgage grouping
+const MORTGAGE_PREFIXES = ["MFAA", "MPA", "FBAA", "BBA", "BIA", "ABA-Broking"];
+function isMortgageAward(award) {
+    return MORTGAGE_PREFIXES.some(p => (award || '').startsWith(p));
+}
+const MORTGAGE_COLORS = { 'Mortgage': '#007eb5', 'Non-Mortgage': '#00c875' };
+
+function buildMonthlyDataGrouped(items, dateField, fromMonth, toMonth) {
+    const monthMap = {};
+    for (const item of items) {
+        const raw = item[dateField];
+        if (!raw) continue;
+        const month = raw.slice(0, 7);
+        if (fromMonth && month < fromMonth) continue;
+        if (toMonth && month > toMonth) continue;
+        const group = isMortgageAward(item.award) ? 'Mortgage' : 'Non-Mortgage';
+        if (!monthMap[month]) monthMap[month] = {};
+        monthMap[month][group] = (monthMap[month][group] || 0) + 1;
+    }
+    const monthKeys = Object.keys(monthMap).sort();
+    const displayLabels = monthKeys.map(m => {
+        const [y, mo] = m.split('-');
+        return new Date(parseInt(y), parseInt(mo) - 1).toLocaleString('default', { month: 'short', year: 'numeric' });
+    });
+    const groups = ['Mortgage', 'Non-Mortgage'];
+    const datasets = groups.map(g => ({
+        label: g,
+        data: monthKeys.map(m => (monthMap[m] || {})[g] || 0),
+        backgroundColor: MORTGAGE_COLORS[g],
+    }));
+    return { monthKeys, displayLabels, datasets };
+}
+
+// Plugin to show total count above each stacked bar
+const totalBarLabelPlugin = {
+    id: 'totalBarLabel',
+    afterDraw(chart) {
+        const { ctx: c, data, scales: { x, y } } = chart;
+        if (!data.labels) return;
+        c.save();
+        c.font = 'bold 11px sans-serif';
+        c.fillStyle = '#333';
+        c.textAlign = 'center';
+        c.textBaseline = 'bottom';
+        for (let i = 0; i < data.labels.length; i++) {
+            let total = 0;
+            for (const ds of data.datasets) total += (ds.data[i] || 0);
+            if (total === 0) continue;
+            const xPos = x.getPixelForValue(i);
+            const yPos = y.getPixelForValue(total);
+            c.fillText(total, xPos, yPos - 4);
+        }
+        c.restore();
+    }
+};
+
+function createMonthlyChart(canvasId, items, dateField, defaultFrom) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return null;
+
+    const { monthKeys, displayLabels, datasets } = buildMonthlyData(items, dateField, defaultFrom, null);
+
+    const chart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: displayLabels, datasets },
+        plugins: [totalBarLabelPlugin],
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            layout: { padding: { top: 20 } },
+            plugins: {
+                legend: { position: 'bottom', labels: { font: { size: 9 }, boxWidth: 10, padding: 6 } },
+                tooltip: { callbacks: { label: c => c.dataset.label + ': ' + c.raw } },
+            },
+            scales: {
+                x: { stacked: true, ticks: { font: { size: 10 }, maxRotation: 45 } },
+                y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1, font: { size: 10 } }, title: { display: true, text: 'Count', font: { size: 10 } } },
+            }
+        }
+    });
+
+    // Store metadata on the chart for click handler
+    chart._monthKeys = monthKeys;
+    chart._items = items;
+    chart._dateField = dateField;
+    chart._groupMode = 'award';
+
+    ctx.style.cursor = 'pointer';
+    ctx.onclick = function(evt) {
+        const points = chart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
+        if (!points.length) return;
+        const point = points[0];
+        const monthLabel = chart.data.labels[point.index];
+        const monthKey = chart._monthKeys[point.index];
+        const groupLabel = chart.data.datasets[point.datasetIndex].label;
+
+        const matched = chart._items.filter(i => {
+            const raw = i[chart._dateField];
+            if (!raw) return false;
+            if (raw.slice(0, 7) !== monthKey) return false;
+            if (chart._groupMode === 'mortgage') {
+                const isMort = isMortgageAward(i.award);
+                return groupLabel === 'Mortgage' ? isMort : !isMort;
+            }
+            return (i.award || 'Unknown') === groupLabel;
+        });
+        if (!matched.length) return;
+        showChartPopup(monthLabel, groupLabel, matched);
+    };
+
+    return chart;
+}
+
+function refreshMonthlyChart(chart, items, dateField, fromMonth, toMonth) {
+    if (!chart) return;
+    const { monthKeys, displayLabels, datasets } = buildMonthlyData(items, dateField, fromMonth, toMonth);
+    chart._monthKeys = monthKeys;
+    chart.data.labels = displayLabels;
+    chart.data.datasets = datasets;
+    chart.update();
+}
+
+// 6. Submitted by Month
+let submittedGroupMode = 'award'; // 'award' or 'mortgage'
+let submittedChart = createMonthlyChart('chart-submitted-month', SUBMITTED_ITEMS, 'submitted_date', null);
+
+function refreshSubmittedWithMode() {
+    const from = document.getElementById('submitted-from').value || null;
+    const to = document.getElementById('submitted-to').value || null;
+    if (!submittedChart) return;
+    const builder = submittedGroupMode === 'mortgage' ? buildMonthlyDataGrouped : buildMonthlyData;
+    const { monthKeys, displayLabels, datasets } = builder(SUBMITTED_ITEMS, 'submitted_date', from, to);
+    submittedChart._monthKeys = monthKeys;
+    submittedChart.data.labels = displayLabels;
+    submittedChart.data.datasets = datasets;
+    submittedChart.update();
+}
+function updateSubmittedChart() { refreshSubmittedWithMode(); }
+function toggleSubmittedGroup() {
+    submittedGroupMode = submittedGroupMode === 'award' ? 'mortgage' : 'award';
+    if (submittedChart) submittedChart._groupMode = submittedGroupMode;
+    const btn = document.getElementById('submitted-group-toggle');
+    btn.textContent = submittedGroupMode === 'award' ? 'By Award' : 'Mortgage / Non-Mortgage';
+    btn.style.background = submittedGroupMode === 'mortgage' ? '#007eb5' : '#f8f9fa';
+    btn.style.color = submittedGroupMode === 'mortgage' ? '#fff' : '#555';
+    refreshSubmittedWithMode();
+}
+
+// 7. Created by Month (all items, not just active) — default from Sep 2024 (bulk load in Aug)
+const ALL_CREATED_ITEMS = {{ all_created_items_json | safe }};
+document.getElementById('created-from').value = '2024-09';
+let createdGroupMode = 'award';
+let createdChart = createMonthlyChart('chart-created-month', ALL_CREATED_ITEMS, 'created_at', '2024-09');
+
+function refreshCreatedWithMode() {
+    const from = document.getElementById('created-from').value || null;
+    const to = document.getElementById('created-to').value || null;
+    if (!createdChart) return;
+    const builder = createdGroupMode === 'mortgage' ? buildMonthlyDataGrouped : buildMonthlyData;
+    const { monthKeys, displayLabels, datasets } = builder(ALL_CREATED_ITEMS, 'created_at', from, to);
+    createdChart._monthKeys = monthKeys;
+    createdChart.data.labels = displayLabels;
+    createdChart.data.datasets = datasets;
+    createdChart.update();
+}
+function updateCreatedChart() { refreshCreatedWithMode(); }
+function toggleCreatedGroup() {
+    createdGroupMode = createdGroupMode === 'award' ? 'mortgage' : 'award';
+    if (createdChart) createdChart._groupMode = createdGroupMode;
+    const btn = document.getElementById('created-group-toggle');
+    btn.textContent = createdGroupMode === 'award' ? 'By Award' : 'Mortgage / Non-Mortgage';
+    btn.style.background = createdGroupMode === 'mortgage' ? '#007eb5' : '#f8f9fa';
+    btn.style.color = createdGroupMode === 'mortgage' ? '#fff' : '#555';
+    refreshCreatedWithMode();
+}
+
+// 8. Cumulative Created vs Submitted — 2025 & 2026 line chart
+(function() {
+    const ctx = document.getElementById('chart-cumulative');
+    if (!ctx) return;
+
+    const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    function countByMonth(items, dateField, year) {
+        const counts = new Array(12).fill(0);
+        for (const item of items) {
+            const raw = item[dateField];
+            if (!raw) continue;
+            const y = parseInt(raw.slice(0, 4));
+            const m = parseInt(raw.slice(5, 7)) - 1;
+            if (y === year) counts[m]++;
+        }
+        return counts;
+    }
+
+    function cumulate(counts) {
+        const result = [];
+        let sum = 0;
+        for (const c of counts) {
+            sum += c;
+            result.push(sum);
+        }
+        return result;
+    }
+
+    // Trim trailing zero months (future months with no data)
+    function trimLength(datasets) {
+        let maxIdx = 0;
+        for (const ds of datasets) {
+            for (let i = ds.data.length - 1; i >= 0; i--) {
+                if (ds.data[i] > 0) { maxIdx = Math.max(maxIdx, i); break; }
+            }
+        }
+        return maxIdx + 1;
+    }
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const lastFullMonth = now.getMonth(); // 0-indexed, include current month
+
+    const created2025 = cumulate(countByMonth(ALL_CREATED_ITEMS, 'created_at', 2025));
+    const created2026 = cumulate(countByMonth(ALL_CREATED_ITEMS, 'created_at', 2026));
+    const submitted2025 = cumulate(countByMonth(SUBMITTED_ITEMS, 'submitted_date', 2025));
+    const submitted2026 = cumulate(countByMonth(SUBMITTED_ITEMS, 'submitted_date', 2026));
+
+    // For current year lines, null out months beyond last full month
+    function trimToLastFull(data, year) {
+        if (year !== currentYear) return data;
+        return data.map((v, i) => i <= lastFullMonth ? v : null);
+    }
+
+    const datasets = [
+        { label: 'Created 2025', data: trimToLastFull(created2025, 2025), borderColor: '#007eb5', backgroundColor: '#007eb5', borderWidth: 2.5, pointRadius: 4, tension: 0.3, spanGaps: false },
+        { label: 'Created 2026', data: trimToLastFull(created2026, 2026), borderColor: '#00c875', backgroundColor: '#00c875', borderWidth: 2.5, pointRadius: 4, tension: 0.3, spanGaps: false },
+        { label: 'Submitted 2025', data: trimToLastFull(submitted2025, 2025), borderColor: '#bb3354', backgroundColor: '#bb3354', borderWidth: 2.5, pointRadius: 4, borderDash: [6, 3], tension: 0.3, spanGaps: false },
+        { label: 'Submitted 2026', data: trimToLastFull(submitted2026, 2026), borderColor: '#fdab3d', backgroundColor: '#fdab3d', borderWidth: 2.5, pointRadius: 4, borderDash: [6, 3], tension: 0.3, spanGaps: false },
+    ];
+
+    // Show all 12 months so prior year lines render fully
+    const labels = MONTH_LABELS;
+
+    new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { font: { size: 12 }, boxWidth: 14, padding: 16, usePointStyle: false },
+                    onClick: function(e, legendItem, legend) {
+                        // Default toggle behaviour — click to hide/show
+                        Chart.defaults.plugins.legend.onClick.call(this, e, legendItem, legend);
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: c => c.dataset.label + ': ' + c.raw,
+                    }
+                },
+            },
+            scales: {
+                x: { ticks: { font: { size: 11 } } },
+                y: { beginAtZero: true, ticks: { font: { size: 10 } }, title: { display: true, text: 'Cumulative Count', font: { size: 11 } } },
+            }
+        }
+    });
+})();
 </script>
 {% endblock %}

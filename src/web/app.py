@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
 from config.settings import load_settings
-from src.adapters.claude_cli import analyse, chat_sync
+from src.adapters.claude_cli import analyse, chat_sync, reset_chat
 from src.adapters.monday_sync import sync_monday, sync_submissions
 from src.store.cache import (
     apply_default_guidelines,
@@ -173,6 +173,44 @@ FINISHED_STATUSES = {"Submitted", "Next Best Offer", "DNP But Billed"}
 EXCLUDED_STATUSES = {"Prospect", "Did Not Proceed"}
 ACTIVE_GROUPS = {"Active", "Future"}
 
+# Australian national public holidays for business day calculations
+from datetime import date as _date, timedelta as _td
+
+AU_PUBLIC_HOLIDAYS = {
+    _date(2025, 1, 1), _date(2025, 1, 27),
+    _date(2025, 4, 18), _date(2025, 4, 19), _date(2025, 4, 21),
+    _date(2025, 4, 25), _date(2025, 6, 9),
+    _date(2025, 12, 25), _date(2025, 12, 26),
+    _date(2026, 1, 1), _date(2026, 1, 26),
+    _date(2026, 4, 3), _date(2026, 4, 4), _date(2026, 4, 6),
+    _date(2026, 4, 25), _date(2026, 4, 27), _date(2026, 6, 8),
+    _date(2026, 12, 25), _date(2026, 12, 26), _date(2026, 12, 28),
+    _date(2027, 1, 1), _date(2027, 1, 26),
+    _date(2027, 3, 26), _date(2027, 3, 27), _date(2027, 3, 29),
+    _date(2027, 4, 26), _date(2027, 6, 14),
+    _date(2027, 12, 25), _date(2027, 12, 27),
+}
+
+
+def business_days_until(date_str: str | None) -> int | None:
+    """Count business days from today to date_str (excl weekends + AU holidays)."""
+    if not date_str:
+        return None
+    try:
+        target = _date.fromisoformat(date_str)
+    except ValueError:
+        return None
+    today = _date.today()
+    if target <= today:
+        return 0
+    count = 0
+    d = today
+    while d < target:
+        d += _td(days=1)
+        if d.weekday() < 5 and d not in AU_PUBLIC_HOLIDAYS:
+            count += 1
+    return count
+
 # Monday delivery status lifecycle order
 STATUS_ORDER = [
     "Awaiting To Open",
@@ -223,6 +261,13 @@ def _manager_data() -> dict:
         i for i in all_items
         if i.get("board_group") in ACTIVE_GROUPS
         and i.get("delivery_status") not in FINISHED_STATUSES
+    ]
+
+    # Submitted items for historical charts (any group, status == Submitted)
+    submitted = [
+        i for i in all_items
+        if i.get("delivery_status") == "Submitted"
+        and i.get("sales_status") not in EXCLUDED_STATUSES
     ]
 
     # Filter alerts to active group only
@@ -322,8 +367,31 @@ def _manager_data() -> dict:
                 "date_alert": i.get("date_alert"),
                 "metrics_status": i.get("metrics_status"),
                 "asset_status": i.get("asset_status"),
+                "created_at": i.get("created_at"),
             }
             for i in active
+        ]),
+        "submitted_items_json": json.dumps([
+            {
+                "name": i.get("name") or "",
+                "award": i.get("award") or "Unknown",
+                "company": i.get("company") or "Unknown",
+                "category": i.get("category") or "",
+                "close_date": i.get("close_date"),
+                "submitted_date": i.get("submitted_date"),
+            }
+            for i in submitted
+        ]),
+        "all_created_items_json": json.dumps([
+            {
+                "name": i.get("name") or "",
+                "award": i.get("award") or "Unknown",
+                "company": i.get("company") or "Unknown",
+                "category": i.get("category") or "",
+                "created_at": i.get("created_at"),
+            }
+            for i in all_items
+            if i.get("sales_status") not in EXCLUDED_STATUSES
         ]),
         "last_sync": last_sync,
         "ai_session_id": ai_session_id,
@@ -620,7 +688,7 @@ async def launch_writing(request: Request):
     script_content = f"""#!/bin/bash
 {cmd}
 curl -s -X POST http://127.0.0.1:8001/api/writing/velma-done > /dev/null 2>&1
-sleep 1
+sleep 5
 osascript -e 'tell application "Terminal" to close front window' &
 exit
 """
@@ -800,51 +868,6 @@ async def run_analysis():
         conn.close()
         return JSONResponse({"ok": True, "summary": "No active alerts to analyse.", "insights": []})
 
-    # Calculate business days (excluding weekends + AU public holidays)
-    from datetime import date as _date, timedelta as _td
-
-    # Australian national public holidays for 2025-2027
-    AU_PUBLIC_HOLIDAYS = {
-        # 2025
-        _date(2025, 1, 1), _date(2025, 1, 27),  # New Year, Australia Day
-        _date(2025, 4, 18), _date(2025, 4, 19), _date(2025, 4, 21),  # Good Friday, Saturday, Easter Monday
-        _date(2025, 4, 25),  # ANZAC Day
-        _date(2025, 6, 9),   # Queen's Birthday (VIC/most states)
-        _date(2025, 12, 25), _date(2025, 12, 26),  # Christmas, Boxing Day
-        # 2026
-        _date(2026, 1, 1), _date(2026, 1, 26),  # New Year, Australia Day
-        _date(2026, 4, 3), _date(2026, 4, 4), _date(2026, 4, 6),  # Good Friday, Saturday, Easter Monday
-        _date(2026, 4, 25),  # ANZAC Day (Saturday — observed Monday 27th)
-        _date(2026, 4, 27),  # ANZAC Day observed
-        _date(2026, 6, 8),   # Queen's Birthday
-        _date(2026, 12, 25), _date(2026, 12, 26),  # Christmas, Boxing Day
-        _date(2026, 12, 28),  # Boxing Day observed (Sat→Mon)
-        # 2027
-        _date(2027, 1, 1), _date(2027, 1, 26),
-        _date(2027, 3, 26), _date(2027, 3, 27), _date(2027, 3, 29),  # Easter
-        _date(2027, 4, 26),  # ANZAC Day observed (Sun→Mon)
-        _date(2027, 6, 14),
-        _date(2027, 12, 25), _date(2027, 12, 27),  # Christmas, Boxing Day observed
-    }
-
-    def _business_days_until(date_str: str | None) -> int | None:
-        if not date_str:
-            return None
-        try:
-            target = _date.fromisoformat(date_str)
-        except ValueError:
-            return None
-        today = _date.today()
-        if target <= today:
-            return 0
-        count = 0
-        d = today
-        while d < target:
-            d += _td(days=1)
-            if d.weekday() < 5 and d not in AU_PUBLIC_HOLIDAYS:
-                count += 1
-        return count
-
     slim_alerts = [
         {
             "monday_id": a["monday_id"],
@@ -852,11 +875,11 @@ async def run_analysis():
             "delivery_status": a.get("delivery_status"),
             "writer": a.get("writer"),
             "close_date": a.get("close_date"),
-            "business_days_to_close": _business_days_until(a.get("close_date")),
+            "business_days_to_close": business_days_until(a.get("close_date")),
             "target_finish_date": a.get("target_finish_date"),
-            "business_days_to_target": _business_days_until(a.get("target_finish_date")),
+            "business_days_to_target": business_days_until(a.get("target_finish_date")),
             "extension_date": a.get("extension_date"),
-            "business_days_to_extension": _business_days_until(a.get("extension_date")),
+            "business_days_to_extension": business_days_until(a.get("extension_date")),
             "contingency_days": a.get("contingency_days"),
             "date_alert": a.get("date_alert"),
             "writer_alert": a.get("writer_alert"),
@@ -873,15 +896,13 @@ async def run_analysis():
         conn.close()
         return JSONResponse({"error": result["error"]})
 
+    # Reset chat history so new analysis starts fresh
+    reset_chat()
+
     # Store insights
     insights = result.get("insights", [])
     if insights:
         upsert_ai_insights(conn, insights)
-
-    # Store session ID for chat continuity
-    session_id = result.get("session_id")
-    if session_id:
-        set_sync_meta(conn, "ai_session_id", session_id)
 
     conn.close()
 
@@ -893,9 +914,65 @@ async def run_analysis():
     })
 
 
+
+def _build_alert_context() -> str:
+    """Build a JSON summary of submissions with active alerts."""
+    conn = get_db(DB_PATH)
+    alerts = get_submission_alerts(conn)
+    conn.close()
+
+    active = [
+        a for a in alerts
+        if a.get("delivery_status") not in FINISHED_STATUSES
+        and a.get("sales_status") not in EXCLUDED_STATUSES
+    ]
+    return json.dumps([_slim_submission(a) for a in active], indent=2, default=str)
+
+
+def _build_full_submissions_context() -> str:
+    """Build a JSON summary of ALL active submissions (called on demand by AI)."""
+    conn = get_db(DB_PATH)
+    all_items = get_all_submission_items(conn)
+    conn.close()
+
+    active = [
+        i for i in all_items
+        if i.get("delivery_status") not in FINISHED_STATUSES
+        and i.get("sales_status") not in EXCLUDED_STATUSES
+    ]
+    return json.dumps([_slim_submission(a) for a in active], indent=2, default=str)
+
+
+def _slim_submission(a: dict) -> dict:
+    """Extract the fields relevant for AI chat from a submission row."""
+    return {
+        "monday_id": str(a.get("monday_id", "")),
+        "name": a.get("name"),
+        "board_group": a.get("board_group"),
+        "delivery_status": a.get("delivery_status"),
+        "sales_status": a.get("sales_status"),
+        "writer": a.get("writer"),
+        "reviewer": a.get("reviewer"),
+        "award": a.get("award"),
+        "category": a.get("category"),
+        "company": a.get("company"),
+        "close_date": a.get("close_date"),
+        "business_days_to_close": business_days_until(a.get("close_date")),
+        "target_finish_date": a.get("target_finish_date"),
+        "business_days_to_target": business_days_until(a.get("target_finish_date")),
+        "extension_date": a.get("extension_date"),
+        "business_days_to_extension": business_days_until(a.get("extension_date")),
+        "contingency_days": a.get("contingency_days"),
+        "date_alert": a.get("date_alert"),
+        "writer_alert": a.get("writer_alert"),
+        "metrics_alert": a.get("metrics_alert"),
+        "asset_alert": a.get("asset_alert"),
+    }
+
+
 @app.post("/api/chat")
 async def chat_endpoint(request: Request):
-    """Chat with Claude, resuming the analysis session."""
+    """Chat with Claude about the delivery pipeline."""
     from fastapi.responses import StreamingResponse
 
     data = await request.json()
@@ -903,28 +980,31 @@ async def chat_endpoint(request: Request):
     if not message:
         return JSONResponse({"error": "No message provided"}, status_code=400)
 
-    conn = get_db(DB_PATH)
-    session_id = get_sync_meta(conn, "ai_session_id")
-    conn.close()
+    import asyncio
+    alert_context = _build_alert_context()
+    rules_context = _get_rules_context()
 
-    # For now, use synchronous chat and return as SSE
-    result = chat_sync(message, session_id)
-
-    # Update session ID if it changed
-    new_session_id = result.get("session_id")
-    if new_session_id and new_session_id != session_id:
-        conn = get_db(DB_PATH)
-        set_sync_meta(conn, "ai_session_id", new_session_id)
-        conn.close()
+    result = await asyncio.to_thread(
+        chat_sync,
+        message=message,
+        alert_context=alert_context,
+        rules_context=rules_context,
+        fetch_full_data=_build_full_submissions_context,
+    )
 
     async def event_stream():
-        import json as json_mod
         text = result.get("text", "")
-        # Send the full response as a single SSE event
-        yield f"data: {json_mod.dumps({'text': text})}\n\n"
+        yield f"data: {json.dumps({'text': text})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/chat/reset")
+async def chat_reset_endpoint():
+    """Clear chat history."""
+    reset_chat()
+    return JSONResponse({"ok": True})
 
 
 if __name__ == "__main__":

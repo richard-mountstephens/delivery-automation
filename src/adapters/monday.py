@@ -7,6 +7,7 @@ import httpx
 
 from src.adapters.models import EdnaItem
 from src.adapters.submission_models import SubmissionItem
+from src.adapters.velma_models import VelmaItem
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,6 @@ class MondayAdapter:
                     If None, fetches all items.
         """
         board_id = self.boards["edna_tracker"]
-        col_map = self.columns["edna_tracker"]
 
         group_ids = None
         if groups:
@@ -52,7 +52,11 @@ class MondayAdapter:
                 logger.warning("No matching group IDs found for %s", groups)
 
         items = self._fetch_board_items(board_id, label="edna tracker", group_ids=group_ids)
+        return self.parse_edna_items(items)
 
+    def parse_edna_items(self, items: list[dict]) -> list[EdnaItem]:
+        """Parse raw edna tracker items into EdnaItem models."""
+        col_map = self.columns["edna_tracker"]
         edna_items: list[EdnaItem] = []
         for item in items:
             cols = _parse_column_values(item["column_values"])
@@ -60,7 +64,6 @@ class MondayAdapter:
                 group = item.get("group")
                 board_group = group["title"] if group else None
 
-                # Parse link column — has both URL and display text
                 link_url, link_text = _link(cols, col_map["edna_review_link"])
 
                 edna_item = EdnaItem(
@@ -84,12 +87,18 @@ class MondayAdapter:
         return edna_items
 
     def get_submission_items(self) -> list[SubmissionItem]:
-        """Fetch all items from the New Award Submission Tracker board."""
-        board_id = self.boards["submission_tracker"]
+        """Fetch all items from the submission tracker boards (active + archive)."""
+        board_ids = self.boards["submission_tracker"]
+        if not isinstance(board_ids, list):
+            board_ids = [board_ids]
+        all_items = []
+        for board_id in board_ids:
+            all_items.extend(self._fetch_board_items(board_id, label=f"submission tracker {board_id}"))
+        return self.parse_submission_items(all_items)
+
+    def parse_submission_items(self, items: list[dict]) -> list[SubmissionItem]:
+        """Parse raw submission tracker items into SubmissionItem models."""
         col_map = self.columns["submission_tracker"]
-
-        items = self._fetch_board_items(board_id, label="submission tracker")
-
         submission_items: list[SubmissionItem] = []
         for item in items:
             cols = _parse_column_values(item["column_values"])
@@ -97,14 +106,19 @@ class MondayAdapter:
                 group = item.get("group")
                 board_group = group["title"] if group else None
 
-                # Checkbox: parse from JSON value
                 escalate = _checkbox(cols, col_map["escalate"])
+                sl_url, sl_text = _link(cols, col_map["submission_link"])
+
+                delivery_status = _text(cols, col_map["delivery_status"])
+                submitted_date = _submitted_date(cols, col_map["delivery_status"], delivery_status)
 
                 sub = SubmissionItem(
                     monday_id=item["id"],
                     name=item["name"],
                     board_group=board_group,
-                    delivery_status=_text(cols, col_map["delivery_status"]),
+                    created_at=item.get("created_at"),
+                    delivery_status=delivery_status,
+                    submitted_date=submitted_date,
                     sales_status=_text(cols, col_map["sales_status"]),
                     writer=_text(cols, col_map["writer"]),
                     reviewer=_text(cols, col_map["reviewer"]),
@@ -127,6 +141,9 @@ class MondayAdapter:
                     asset_days_since=_text(cols, col_map["asset_days_since"]),
                     writer_due=_text(cols, col_map["writer_due"]),
                     reviewer_due=_text(cols, col_map["reviewer_due"]),
+                    submission_link_url=sl_url,
+                    submission_link_text=sl_text,
+                    result_status=_text(cols, col_map["result_status"]),
                     monday_updated_at=item.get("updated_at"),
                 )
                 submission_items.append(sub)
@@ -134,6 +151,82 @@ class MondayAdapter:
                 logger.warning("Skipping submission item %s: parse error", item["id"], exc_info=True)
 
         return submission_items
+
+    def get_velma_items(self, groups: list[str] | None = None) -> list[VelmaItem]:
+        """Fetch items from the Briefed Velma Tracker board."""
+        board_id = self.boards["velma_tracker"]
+
+        group_ids = None
+        if groups:
+            group_ids = self.get_board_group_ids(board_id, groups)
+            if not group_ids:
+                logger.warning("No matching group IDs found for %s", groups)
+
+        items = self._fetch_board_items(board_id, label="velma tracker", group_ids=group_ids)
+        return self.parse_velma_items(items)
+
+    def parse_velma_items(self, items: list[dict]) -> list[VelmaItem]:
+        """Parse raw velma tracker items into VelmaItem models."""
+        col_map = self.columns["velma_tracker"]
+        velma_items: list[VelmaItem] = []
+        for item in items:
+            cols = _parse_column_values(item["column_values"])
+            try:
+                group = item.get("group")
+                board_group = group["title"] if group else None
+
+                it_url, it_text = _link(cols, col_map["interview_transcript"])
+                pi_url, pi_text = _link(cols, col_map["processed_interview"])
+                ps1_url, ps1_text = _link(cols, col_map["prev_submission_1"])
+                ps2_url, ps2_text = _link(cols, col_map["prev_submission_2"])
+                sd1_url, sd1_text = _link(cols, col_map["supporting_doc_1"])
+                sd2_url, sd2_text = _link(cols, col_map["supporting_doc_2"])
+                sd3_url, sd3_text = _link(cols, col_map["supporting_doc_3"])
+                sd4_url, sd4_text = _link(cols, col_map["supporting_doc_4"])
+                ms_url, ms_text = _link(cols, col_map["mapped_submission"])
+                vd_url, vd_text = _link(cols, col_map["velma_draft"])
+
+                tracker_rel = cols.get(col_map["tracker_relation"], {})
+                linked_ids = tracker_rel.get("linked_item_ids", [])
+                tracker_submission_id = str(linked_ids[0]) if linked_ids else None
+
+                velma_item = VelmaItem(
+                    monday_id=item["id"],
+                    name=item["name"],
+                    board_group=board_group,
+                    velma_status=_text(cols, col_map["velma_status"]),
+                    writer=_text(cols, col_map["writer"]),
+                    award=_text(cols, col_map["award"]),
+                    category=_text(cols, col_map["category"]),
+                    interview_transcript_url=it_url,
+                    interview_transcript_text=it_text,
+                    submission_link=_text(cols, col_map["submission_link"]),
+                    prev_submission_1_url=ps1_url,
+                    prev_submission_1_text=ps1_text,
+                    prev_submission_2_url=ps2_url,
+                    prev_submission_2_text=ps2_text,
+                    supporting_doc_1_url=sd1_url,
+                    supporting_doc_1_text=sd1_text,
+                    supporting_doc_2_url=sd2_url,
+                    supporting_doc_2_text=sd2_text,
+                    supporting_doc_3_url=sd3_url,
+                    supporting_doc_3_text=sd3_text,
+                    supporting_doc_4_url=sd4_url,
+                    supporting_doc_4_text=sd4_text,
+                    processed_interview_url=pi_url,
+                    processed_interview_text=pi_text,
+                    mapped_submission_url=ms_url,
+                    mapped_submission_text=ms_text,
+                    velma_draft_url=vd_url,
+                    velma_draft_text=vd_text,
+                    tracker_submission_id=tracker_submission_id,
+                    monday_updated_at=item.get("updated_at"),
+                )
+                velma_items.append(velma_item)
+            except Exception:
+                logger.warning("Skipping velma item %s: parse error", item["id"], exc_info=True)
+
+        return velma_items
 
     # -- Internal helpers -----------------------------------------------------
 
@@ -159,9 +252,34 @@ class MondayAdapter:
         print(f"Fetched {len(all_items)} {label} total.")
         return all_items
 
-    def _execute_query(self, query: str) -> dict:
+    def update_item_columns(self, board_id: int, item_id: str, column_values: dict) -> bool:
+        """Update multiple columns on a Monday.com item (status, links, etc)."""
+        mutation = """
+        mutation($board_id: ID!, $item_id: ID!, $column_values: JSON!) {
+            change_multiple_column_values(
+                board_id: $board_id
+                item_id: $item_id
+                column_values: $column_values
+            ) { id }
+        }
+        """
+        variables = {
+            "board_id": str(board_id),
+            "item_id": str(item_id),
+            "column_values": json.dumps(column_values),
+        }
+        body = self._execute_query(mutation, variables=variables)
+        return "data" in body and body["data"].get("change_multiple_column_values") is not None
+
+    def update_item_status(self, board_id: int, item_id: str, status_col_id: str, status_label: str) -> bool:
+        """Update a status column on a Monday.com item."""
+        return self.update_item_columns(board_id, item_id, {status_col_id: {"label": status_label}})
+
+    def _execute_query(self, query: str, variables: dict | None = None) -> dict:
         """Send a GraphQL query to Monday.com and return the parsed response."""
         payload = {"query": query}
+        if variables:
+            payload["variables"] = variables
 
         try:
             resp = self.client.post(MONDAY_API_URL, json=payload)
@@ -212,6 +330,7 @@ def _build_items_query(board_id: int, cursor: str | None, group_ids: list[str] |
         " ... on MirrorValue { display_value }"
         " ... on FormulaValue { display_value }"
         " ... on BoardRelationValue { display_value linked_item_ids }"
+        " ... on StatusValue { updated_at }"
         " } } } } }"
     )
 
@@ -266,6 +385,26 @@ def _checkbox(cols: dict[str, dict], col_id: str) -> bool:
     return text.strip().lower() in ("v", "true", "yes")
 
 
+def _submitted_date(cols: dict[str, dict], col_id: str, delivery_status: str | None) -> str | None:
+    """Extract updated_at date from the status column when delivery_status is 'Submitted'.
+
+    Monday.com StatusValue exposes an updated_at timestamp that records
+    when the status was last changed — giving us the exact submission date.
+    """
+    if delivery_status != "Submitted" or not col_id:
+        return None
+    cv = cols.get(col_id)
+    if cv is None:
+        return None
+    updated_at = cv.get("updated_at")
+    if not updated_at:
+        return None
+    try:
+        return updated_at[:10]  # YYYY-MM-DD
+    except (TypeError, IndexError):
+        return None
+
+
 def _link(cols: dict[str, dict], col_id: str) -> tuple[str | None, str | None]:
     """Extract URL and display text from a link column."""
     cv = cols.get(col_id)
@@ -283,6 +422,12 @@ def _link(cols: dict[str, dict], col_id: str) -> tuple[str | None, str | None]:
             display_text = parsed.get("text")
         except (json.JSONDecodeError, TypeError):
             pass
+
+    # Normalize empty strings to None
+    if url is not None and url.strip() == "":
+        url = None
+    if display_text is not None and display_text.strip() == "":
+        display_text = None
 
     # Fallback: text field may contain "display - url" format
     if not url:

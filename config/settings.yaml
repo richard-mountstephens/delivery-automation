@@ -1,0 +1,69 @@
+database:
+  path: delivery_hub.db
+
+monday:
+  boards:
+    edna_tracker: 2026518054
+    submission_tracker:
+      - 5027853643  # 2026 Active
+      - 5027853435  # 2025 Archive
+    velma_tracker: 5026608054
+
+  columns:
+    edna_tracker:
+      award: lookup_mkrv186d
+      category: lookup_mkrv1azg
+      edna_status: color_mkrtb6ve
+      triage_score: numeric_mkrt82e4
+      writer: lookup_mkrvgebv
+      reviewer: lookup_mkrvdj25
+      edna_review_link: link_mkrtamnn
+      tracker_submission: board_relation_mkrtpt20
+
+    velma_tracker:
+      velma_status: status
+      writer: lookup_mm1hg883
+      award: lookup_mm0hffmm
+      category: lookup_mm0hn75a
+      interview_transcript: link_mm0h89z4
+      processed_interview: link_mm0h9spt
+      tracker_relation: board_relation_mm0h4q32
+      submission_link: lookup_mm0hn549
+      prev_submission_1: link_mm0h124p
+      prev_submission_2: link_mm0hx5kt
+      supporting_doc_1: link_mm0h626p
+      supporting_doc_2: link_mm0hzpm6
+      supporting_doc_3: link_mm0khejj
+      supporting_doc_4: link_mm0k97q4
+      mapped_submission: link_mm0hbq9j
+      velma_draft: link_mm0h7y1w
+
+    submission_tracker:
+      delivery_status: status
+      sales_status: status1
+      writer: dropdown
+      reviewer: dropdown4
+      close_date: mirror95
+      target_finish_date: date1
+      extension_date: mirror
+      category: text9
+      company: mirror_141
+      escalate: checkbox7
+      # Formula-computed alert columns
+      date_alert: formula3
+      writer_alert: formula_mkmxg70k
+      metrics_alert: formula_mkw3dnq7
+      asset_alert: formula_mkw3nmbk
+      contingency_days: formula_mkr6qqq0
+      spare_days_est: formula_mkraqd7a
+      days_since: formula6
+      metrics_status: color_mkw2gxna
+      asset_status: status5
+      asset_days_since: formula_mkr6dafj
+      writer_due: date9
+      reviewer_due: date_mkmxjzby
+      submission_link: link91
+      result_status: status11
+      # Relations
+      award: board_relation
+      client: connect_boards0

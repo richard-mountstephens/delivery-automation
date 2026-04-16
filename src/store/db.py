@@ -51,6 +51,41 @@ CREATE TABLE IF NOT EXISTS cache_submission_items (
     synced_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS cache_velma_items (
+    monday_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    board_group TEXT,
+    velma_status TEXT,
+    writer TEXT,
+    award TEXT,
+    category TEXT,
+    interview_transcript_url TEXT,
+    interview_transcript_text TEXT,
+    processed_interview_url TEXT,
+    processed_interview_text TEXT,
+    submission_link TEXT,
+    prev_submission_1_url TEXT,
+    prev_submission_1_text TEXT,
+    prev_submission_2_url TEXT,
+    prev_submission_2_text TEXT,
+    supporting_doc_1_url TEXT,
+    supporting_doc_1_text TEXT,
+    supporting_doc_2_url TEXT,
+    supporting_doc_2_text TEXT,
+    supporting_doc_3_url TEXT,
+    supporting_doc_3_text TEXT,
+    supporting_doc_4_url TEXT,
+    supporting_doc_4_text TEXT,
+    mapped_submission_url TEXT,
+    mapped_submission_text TEXT,
+    velma_draft_url TEXT,
+    velma_draft_text TEXT,
+    tracker_submission_id TEXT,
+    guideline TEXT,
+    monday_updated_at TEXT,
+    synced_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS cache_ai_insights (
     monday_id TEXT PRIMARY KEY,
     recommendation TEXT,
@@ -85,6 +120,15 @@ def get_db(db_path: str | Path) -> sqlite3.Connection:
         ("cache_submission_items", "asset_days_since", "TEXT"),
         ("cache_submission_items", "writer_due", "TEXT"),
         ("cache_submission_items", "reviewer_due", "TEXT"),
+        ("cache_velma_items", "writer", "TEXT"),
+        ("cache_velma_items", "award", "TEXT"),
+        ("cache_velma_items", "category", "TEXT"),
+        ("cache_velma_items", "tracker_submission_id", "TEXT"),
+        ("cache_submission_items", "submission_link_url", "TEXT"),
+        ("cache_submission_items", "submission_link_text", "TEXT"),
+        ("cache_submission_items", "result_status", "TEXT"),
+        ("cache_submission_items", "submitted_date", "TEXT"),
+        ("cache_submission_items", "created_at", "TEXT"),
     ]:
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")

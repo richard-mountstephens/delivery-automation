@@ -112,11 +112,16 @@ class MondayAdapter:
                 delivery_status = _text(cols, col_map["delivery_status"])
                 submitted_date = _submitted_date(cols, col_map["delivery_status"], delivery_status)
 
+                # Prefer creation_log column (preserves original date after board duplication)
+                # over Monday's created_at (which resets on duplication)
+                creation_log_text = _text(cols, col_map.get("creation_log", ""))
+                original_created_at = creation_log_text or item.get("created_at")
+
                 sub = SubmissionItem(
                     monday_id=item["id"],
                     name=item["name"],
                     board_group=board_group,
-                    created_at=item.get("created_at"),
+                    created_at=original_created_at,
                     delivery_status=delivery_status,
                     submitted_date=submitted_date,
                     sales_status=_text(cols, col_map["sales_status"]),

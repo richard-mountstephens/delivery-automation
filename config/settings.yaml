@@ -39,6 +39,7 @@ monday:
       velma_draft: link_mm0h7y1w
 
     submission_tracker:
+      creation_log: creation_log
       delivery_status: status
       sales_status: status1
       writer: dropdown

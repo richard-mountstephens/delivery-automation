@@ -5,6 +5,7 @@ import time
 
 from src.adapters.models import EdnaItem
 from src.adapters.submission_models import SubmissionItem
+from src.adapters.velma_models import VelmaItem
 
 
 def bulk_upsert_edna_items(conn: sqlite3.Connection, items: list[EdnaItem]) -> None:
@@ -72,6 +73,92 @@ def update_guideline(conn: sqlite3.Connection, monday_id: str, guideline: str) -
     conn.commit()
 
 
+# -- Velma items -------------------------------------------------------------
+
+
+def bulk_upsert_velma_items(conn: sqlite3.Connection, items: list[VelmaItem]) -> None:
+    """Insert or replace Velma items into the cache, preserving user-set guideline."""
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    existing = {
+        row["monday_id"]: row["guideline"]
+        for row in conn.execute("SELECT monday_id, guideline FROM cache_velma_items").fetchall()
+    }
+    conn.executemany(
+        """INSERT OR REPLACE INTO cache_velma_items
+           (monday_id, name, board_group, velma_status,
+            writer, award, category,
+            interview_transcript_url, interview_transcript_text,
+            processed_interview_url, processed_interview_text,
+            submission_link,
+            prev_submission_1_url, prev_submission_1_text,
+            prev_submission_2_url, prev_submission_2_text,
+            supporting_doc_1_url, supporting_doc_1_text,
+            supporting_doc_2_url, supporting_doc_2_text,
+            supporting_doc_3_url, supporting_doc_3_text,
+            supporting_doc_4_url, supporting_doc_4_text,
+            mapped_submission_url, mapped_submission_text,
+            velma_draft_url, velma_draft_text,
+            tracker_submission_id,
+            guideline, monday_updated_at, synced_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            (
+                item.monday_id, item.name, item.board_group, item.velma_status,
+                item.writer, item.award, item.category,
+                item.interview_transcript_url, item.interview_transcript_text,
+                item.processed_interview_url, item.processed_interview_text,
+                item.submission_link,
+                item.prev_submission_1_url, item.prev_submission_1_text,
+                item.prev_submission_2_url, item.prev_submission_2_text,
+                item.supporting_doc_1_url, item.supporting_doc_1_text,
+                item.supporting_doc_2_url, item.supporting_doc_2_text,
+                item.supporting_doc_3_url, item.supporting_doc_3_text,
+                item.supporting_doc_4_url, item.supporting_doc_4_text,
+                item.mapped_submission_url, item.mapped_submission_text,
+                item.velma_draft_url, item.velma_draft_text,
+                item.tracker_submission_id,
+                existing.get(item.monday_id),
+                item.monday_updated_at, now,
+            )
+            for item in items
+        ],
+    )
+    conn.commit()
+
+
+def get_all_velma_items(conn: sqlite3.Connection) -> list[dict]:
+    """Return all cached Velma items as dicts."""
+    rows = conn.execute("SELECT * FROM cache_velma_items").fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_velma_guideline(conn: sqlite3.Connection, monday_id: str, guideline: str) -> None:
+    """Update the guideline code for a single Velma item."""
+    conn.execute(
+        "UPDATE cache_velma_items SET guideline = ? WHERE monday_id = ?",
+        (guideline, monday_id),
+    )
+    conn.commit()
+
+
+def apply_default_velma_guidelines(conn: sqlite3.Connection) -> None:
+    """Set default guideline for Velma items that don't have one yet."""
+    rows = conn.execute(
+        "SELECT monday_id, name, award FROM cache_velma_items WHERE guideline IS NULL"
+    ).fetchall()
+    if not rows:
+        return
+    updates: list[tuple[str, str]] = []
+    for row in rows:
+        award = row["award"] or row["name"] or ""
+        guideline = "m" if any(award.startswith(p) for p in MORTGAGE_PREFIXES) else "s"
+        updates.append((guideline, row["monday_id"]))
+    conn.executemany(
+        "UPDATE cache_velma_items SET guideline = ? WHERE monday_id = ?", updates
+    )
+    conn.commit()
+
+
 # -- Submission items --------------------------------------------------------
 
 
@@ -87,8 +174,9 @@ def bulk_upsert_submission_items(conn: sqlite3.Connection, items: list[Submissio
             contingency_days, spare_days_est,
             days_since, metrics_status, asset_status, asset_days_since,
             writer_due, reviewer_due,
-            monday_updated_at, synced_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            submission_link_url, submission_link_text, result_status,
+            submitted_date, created_at, monday_updated_at, synced_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
                 item.monday_id, item.name, item.board_group,
@@ -101,7 +189,8 @@ def bulk_upsert_submission_items(conn: sqlite3.Connection, items: list[Submissio
                 item.contingency_days, item.spare_days_est,
                 item.days_since, item.metrics_status, item.asset_status, item.asset_days_since,
                 item.writer_due, item.reviewer_due,
-                item.monday_updated_at, now,
+                item.submission_link_url, item.submission_link_text, item.result_status,
+                item.submitted_date, item.created_at, item.monday_updated_at, now,
             )
             for item in items
         ],

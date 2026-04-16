@@ -31,4 +31,9 @@ class SubmissionItem(BaseModel):
     asset_days_since: str | None = None
     writer_due: str | None = None
     reviewer_due: str | None = None
+    submission_link_url: str | None = None
+    submission_link_text: str | None = None
+    result_status: str | None = None
+    submitted_date: str | None = None
+    created_at: str | None = None
     monday_updated_at: str | None = None

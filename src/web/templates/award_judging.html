@@ -23,7 +23,7 @@
     .group-header.collapsed .group-chevron { transform: rotate(-90deg); }
     .group-title { font-size: 14px; font-weight: 700; color: #1a1a2e; }
     .group-count { font-size: 12px; color: #888; font-weight: 500; }
-    .group-table-wrap { overflow: hidden; }
+    .group-table-wrap { overflow-x: auto; }
     .group-header.collapsed + .group-table-wrap { display: none; }
 
     .group-table { border-radius: 0 0 8px 8px; border-top: none; }
@@ -49,6 +49,26 @@
 
     .empty-state { text-align: center; padding: 60px 20px; color: #888; }
     .empty-state p { margin-bottom: 12px; }
+
+    /* Sortable + filterable headers */
+    .group-table th { cursor: pointer; user-select: none; white-space: nowrap; position: relative; }
+    .group-table th.no-sort { cursor: default; }
+    .group-table th .sort-indicator { font-size: 9px; margin-left: 3px; color: #bbb; }
+    .group-table th.sorted-asc .sort-indicator,
+    .group-table th.sorted-desc .sort-indicator { color: #662d91; }
+    .group-table th.sorted-asc .sort-indicator::after { content: '\25B2'; }
+    .group-table th.sorted-desc .sort-indicator::after { content: '\25BC'; }
+    .group-table th:not(.sorted-asc):not(.sorted-desc) .sort-indicator::after { content: '\25BC'; }
+
+    /* Filter bar */
+    .filter-bar { display: flex; gap: 10px; align-items: center; padding: 8px 14px; background: #fff; border: 1px solid #e9ecef; border-top: none; font-size: 12px; flex-wrap: wrap; }
+    .filter-bar label { color: #888; font-weight: 600; }
+    .filter-select { padding: 3px 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; background: white; cursor: pointer; }
+    .filter-select:focus { outline: none; border-color: #662d91; }
+    .filter-active { border-color: #662d91; background: #f9f0ff; }
+    .btn-clear-filters { background: none; border: 1px solid #ddd; padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; color: #888; }
+    .btn-clear-filters:hover { background: #f0f0f0; }
+    .updated-cell { font-size: 12px; color: #888; white-space: nowrap; }
 
     .stats-section { margin-top: 28px; }
     .stats-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; cursor: pointer; user-select: none; }
@@ -122,19 +142,37 @@
             <span class="group-count">({{ items | length }})</span>
         </div>
         <div class="group-table-wrap">
+            <div class="filter-bar">
+                <label>Filter:</label>
+                <select class="filter-select" data-col="1" onchange="applyFilters(this)">
+                    <option value="">All Awards</option>
+                </select>
+                <select class="filter-select" data-col="3" onchange="applyFilters(this)">
+                    <option value="">All Statuses</option>
+                </select>
+                <select class="filter-select" data-col="5" onchange="applyFilters(this)">
+                    <option value="">All Writers</option>
+                </select>
+                <select class="filter-select" data-col="6" onchange="applyFilters(this)">
+                    <option value="">All Reviewers</option>
+                </select>
+                <button class="btn-clear-filters" onclick="clearFilters(this)">Clear</button>
+            </div>
             <table class="group-table">
                 <thead>
                     <tr>
-                        <th>Name</th>
-                        <th>Award</th>
-                        <th>Category</th>
-                        <th>Edna Status</th>
-                        <th>Score</th>
-                        <th>Writer</th>
-                        <th>Reviewer</th>
-                        <th>Edna Review</th>
-                        <th>Guide</th>
-                        <th>Action</th>
+                        <th data-sort="text">Name <span class="sort-indicator"></span></th>
+                        <th data-sort="text">Award <span class="sort-indicator"></span></th>
+                        <th data-sort="text">Category <span class="sort-indicator"></span></th>
+                        <th data-sort="text">Edna Status <span class="sort-indicator"></span></th>
+                        <th data-sort="num">Score <span class="sort-indicator"></span></th>
+                        <th data-sort="text">Writer <span class="sort-indicator"></span></th>
+                        <th data-sort="text">Reviewer <span class="sort-indicator"></span></th>
+                        <th class="no-sort">Edna Review</th>
+                        <th class="no-sort">Submission</th>
+                        <th data-sort="text">Guide <span class="sort-indicator"></span></th>
+                        <th data-sort="date">Updated <span class="sort-indicator"></span></th>
+                        <th class="no-sort">Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -166,6 +204,9 @@
                                 {{ item.edna_review_link_text }}
                             {% else %}—{% endif %}
                         </td>
+                        <td class="link-cell">
+                            <a href="https://reputationbydesign.monday.com/boards/{{ edna_board_id }}/pulses/{{ item.monday_id }}" target="_blank" rel="noopener">View</a>
+                        </td>
                         <td>
                             <select class="guide-select"
                                     data-monday-id="{{ item.monday_id }}"
@@ -173,6 +214,11 @@
                                 <option value="m" {% if item.guideline == 'm' %}selected{% endif %}>m</option>
                                 <option value="s" {% if item.guideline != 'm' %}selected{% endif %}>s</option>
                             </select>
+                        </td>
+                        <td class="updated-cell" data-ts="{{ item.monday_updated_at or '' }}">
+                            {% if item.monday_updated_at %}
+                                {{ item.monday_updated_at[:10] }}
+                            {% else %}—{% endif %}
                         </td>
                         <td>
                             {% if item.edna_status == 'Pending' %}
@@ -319,6 +365,124 @@ function launchJudge(btn) {
     });
 }
 
+// -- Column sorting for group tables --
+document.querySelectorAll('.group-table th[data-sort]').forEach(th => {
+    th.addEventListener('click', function() {
+        const table = th.closest('table');
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const colIdx = Array.from(th.parentNode.children).indexOf(th);
+        const sortType = th.dataset.sort;
+
+        const asc = th.classList.contains('sorted-asc');
+        table.querySelectorAll('th').forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+        th.classList.add(asc ? 'sorted-desc' : 'sorted-asc');
+
+        rows.sort((a, b) => {
+            let va, vb;
+            if (sortType === 'date') {
+                va = a.children[colIdx].dataset.ts || '';
+                vb = b.children[colIdx].dataset.ts || '';
+            } else {
+                va = a.children[colIdx].textContent.trim();
+                vb = b.children[colIdx].textContent.trim();
+            }
+            if (sortType === 'num') {
+                va = parseFloat(va) || 0;
+                vb = parseFloat(vb) || 0;
+                return asc ? vb - va : va - vb;
+            }
+            // text and date both sort as strings (ISO dates sort correctly as strings)
+            if (va === '—') va = '';
+            if (vb === '—') vb = '';
+            return asc ? vb.localeCompare(va) : va.localeCompare(vb);
+        });
+
+        rows.forEach(r => tbody.appendChild(r));
+    });
+});
+
+// -- Filter dropdowns --
+function populateFilters() {
+    document.querySelectorAll('.group-table-wrap').forEach(wrap => {
+        const table = wrap.querySelector('.group-table');
+        if (!table) return;
+        const selects = wrap.querySelectorAll('.filter-select');
+        selects.forEach(sel => {
+            const colIdx = parseInt(sel.dataset.col);
+            const values = new Set();
+            table.querySelectorAll('tbody tr').forEach(row => {
+                const text = row.children[colIdx].textContent.trim();
+                if (text && text !== '—') values.add(text);
+            });
+            const sorted = Array.from(values).sort();
+            const defaultLabel = sel.options[0].textContent;
+            sel.innerHTML = '<option value="">' + defaultLabel + '</option>';
+            sorted.forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v;
+                opt.textContent = v;
+                sel.appendChild(opt);
+            });
+        });
+    });
+}
+
+function applyFilters(changed) {
+    const wrap = changed.closest('.group-table-wrap');
+    const table = wrap.querySelector('.group-table');
+    const selects = wrap.querySelectorAll('.filter-select');
+
+    // Collect active filters
+    const filters = {};
+    selects.forEach(sel => {
+        const v = sel.value;
+        sel.classList.toggle('filter-active', !!v);
+        if (v) filters[parseInt(sel.dataset.col)] = v;
+    });
+
+    // Show/hide rows
+    table.querySelectorAll('tbody tr').forEach(row => {
+        let show = true;
+        for (const [colIdx, val] of Object.entries(filters)) {
+            const cellText = row.children[colIdx].textContent.trim();
+            if (cellText !== val) { show = false; break; }
+        }
+        row.style.display = show ? '' : 'none';
+    });
+}
+
+function clearFilters(btn) {
+    const wrap = btn.closest('.group-table-wrap');
+    wrap.querySelectorAll('.filter-select').forEach(sel => {
+        sel.value = '';
+        sel.classList.remove('filter-active');
+    });
+    wrap.querySelector('.group-table').querySelectorAll('tbody tr').forEach(row => {
+        row.style.display = '';
+    });
+}
+
+// Populate filter options on load
+populateFilters();
+
+// Default sort: Updated column descending (newest first)
+document.querySelectorAll('.group-table').forEach(table => {
+    const ths = table.querySelectorAll('thead th');
+    const updatedTh = Array.from(ths).find(th => th.dataset.sort === 'date');
+    if (!updatedTh) return;
+    const colIdx = Array.from(ths).indexOf(updatedTh);
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort((a, b) => {
+        const va = a.children[colIdx].dataset.ts || '';
+        const vb = b.children[colIdx].dataset.ts || '';
+        return vb.localeCompare(va);
+    });
+    rows.forEach(r => tbody.appendChild(r));
+    updatedTh.classList.add('sorted-desc');
+});
+
 // -- Sortable stats tables --
 document.querySelectorAll('.stats-table th[data-sort]').forEach(th => {
     th.addEventListener('click', function() {
@@ -328,7 +492,6 @@ document.querySelectorAll('.stats-table th[data-sort]').forEach(th => {
         const colIdx = Array.from(th.parentNode.children).indexOf(th);
         const sortType = th.dataset.sort;
 
-        // Toggle direction
         const asc = th.classList.contains('sorted-asc');
         table.querySelectorAll('th').forEach(h => h.classList.remove('sorted', 'sorted-asc', 'sorted-desc'));
         th.classList.add('sorted', asc ? 'sorted-desc' : 'sorted-asc');

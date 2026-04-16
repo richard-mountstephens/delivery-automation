@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import date
 
 import httpx
 
@@ -117,6 +118,17 @@ class MondayAdapter:
                 original_date_text = _text(cols, col_map.get("original_created_date", ""))
                 original_created_at = original_date_text or item.get("created_at")
 
+                sales_status = _text(cols, col_map["sales_status"])
+                close_dt = _text(cols, col_map["close_date"])
+                target_finish = _text(cols, col_map["target_finish_date"])
+                extension_dt = _text(cols, col_map["extension_date"])
+
+                # Monday API doesn't return formula values that reference mirror
+                # columns on duplicated boards — compute date_alert in Python
+                date_alert = _text(cols, col_map["date_alert"]) or _compute_date_alert(
+                    delivery_status, sales_status, target_finish, close_dt, extension_dt,
+                )
+
                 sub = SubmissionItem(
                     monday_id=item["id"],
                     name=item["name"],
@@ -124,17 +136,17 @@ class MondayAdapter:
                     created_at=original_created_at,
                     delivery_status=delivery_status,
                     submitted_date=submitted_date,
-                    sales_status=_text(cols, col_map["sales_status"]),
+                    sales_status=sales_status,
                     writer=_text(cols, col_map["writer"]),
                     reviewer=_text(cols, col_map["reviewer"]),
-                    close_date=_text(cols, col_map["close_date"]),
-                    target_finish_date=_text(cols, col_map["target_finish_date"]),
-                    extension_date=_text(cols, col_map["extension_date"]),
+                    close_date=close_dt,
+                    target_finish_date=target_finish,
+                    extension_date=extension_dt,
                     category=_text(cols, col_map["category"]),
                     company=_text(cols, col_map["company"]),
                     award=_text(cols, col_map["award"]),
                     escalate=escalate,
-                    date_alert=_text(cols, col_map["date_alert"]),
+                    date_alert=date_alert,
                     writer_alert=_text(cols, col_map["writer_alert"]),
                     metrics_alert=_text(cols, col_map["metrics_alert"]),
                     asset_alert=_text(cols, col_map["asset_alert"]),
@@ -343,6 +355,49 @@ def _build_items_query(board_id: int, cursor: str | None, group_ids: list[str] |
 def _parse_column_values(column_values: list[dict]) -> dict[str, dict]:
     """Index column_values by column ID for fast lookup."""
     return {cv["id"]: cv for cv in column_values}
+
+
+def _compute_date_alert(
+    delivery_status: str | None,
+    sales_status: str | None,
+    target_finish: str | None,
+    close_date: str | None,
+    extension_date: str | None,
+) -> str | None:
+    """Python fallback for the Date Alerts formula.
+
+    Monday API doesn't return formula values that reference mirror columns
+    on duplicated boards, so we replicate the logic here.
+    """
+    ds = delivery_status or ""
+    ss = sales_status or ""
+
+    if ds in ("Submitted", "Next Best Offer", "DNP But Billed", "Submission Issue", ""):
+        return None
+    if ss not in ("Confirmed", "Bundle"):
+        return None
+
+    if not target_finish:
+        if ds not in ("Awaiting To Open", "Delivery Setup", "Confirm Hours", "Writer Briefed"):
+            return "Target Date Blank"
+        return None
+
+    today = date.today().isoformat()
+    effective_close = extension_date or close_date
+
+    target_past = target_finish <= today
+    target_after_close = effective_close and target_finish > effective_close
+
+    if target_past or target_after_close:
+        if ds in ("Awaiting To Open", "Delivery Setup", "Confirm Hours",
+                   "Writer Briefed", "With Writer", "With Velma", "With Reviewer"):
+            return "Target Date Issue (Pre-Review)"
+        return "Target Date Issue (Post-Review)"
+
+    if close_date and target_finish > close_date:
+        return "Target after close"
+
+    return None
 
 
 def _text(cols: dict[str, dict], col_id: str) -> str | None:

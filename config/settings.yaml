@@ -51,7 +51,7 @@ monday:
       company: mirror_141
       escalate: checkbox7
       # Formula-computed alert columns
-      date_alert: formula3
+      date_alert: formula_mm2fqrg4
       writer_alert: formula_mkmxg70k
       metrics_alert: formula_mkw3dnq7
       asset_alert: formula_mkw3nmbk

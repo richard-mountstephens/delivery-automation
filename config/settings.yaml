@@ -39,7 +39,7 @@ monday:
       velma_draft: link_mm0h7y1w
 
     submission_tracker:
-      creation_log: creation_log
+      original_created_date: date_mm2f26h2  # 2026 Active board; archive uses date_mm2fqjxy
       delivery_status: status
       sales_status: status1
       writer: dropdown

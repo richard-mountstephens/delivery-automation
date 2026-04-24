@@ -783,11 +783,15 @@ async def launch_judging(request: Request):
     award_flag = f" --award '{award.replace(chr(39), chr(39) + chr(92) + chr(39) + chr(39))}'" if award else ""
     cmd = f"edna judge -g {guideline}{award_flag} '{safe_name}'"
 
+    # Re-escape for AppleScript double-quoted string: backslashes and quotes
+    as_cmd = cmd.replace("\\", "\\\\").replace('"', '\\"')
     osascript = f'''tell application "Terminal"
   activate
-  do script "{cmd}"
+  do script "{as_cmd}"
 end tell'''
-    subprocess.Popen(["osascript", "-e", osascript])
+    result = subprocess.run(["osascript", "-e", osascript], capture_output=True, text=True)
+    if result.returncode != 0:
+        return JSONResponse({"error": result.stderr.strip() or "osascript failed"}, status_code=500)
     return JSONResponse({"ok": True})
 
 

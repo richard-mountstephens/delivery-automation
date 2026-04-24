@@ -42,6 +42,34 @@ def get_all_edna_items(conn: sqlite3.Connection) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def delete_edna_items_not_in(
+    conn: sqlite3.Connection,
+    keep_ids: set[str],
+    board_groups: list[str] | None = None,
+) -> int:
+    """Delete cached edna items whose monday_id is not in keep_ids.
+
+    If board_groups is given, only rows in those groups are considered — used by
+    quick sync (scope = just "Active") so items in other groups aren't wiped.
+    """
+    if board_groups:
+        placeholders = ",".join("?" * len(board_groups))
+        rows = conn.execute(
+            f"SELECT monday_id FROM cache_edna_items WHERE board_group IN ({placeholders})",  # noqa: S608
+            tuple(board_groups),
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT monday_id FROM cache_edna_items").fetchall()
+    to_delete = [r["monday_id"] for r in rows if r["monday_id"] not in keep_ids]
+    if to_delete:
+        conn.executemany(
+            "DELETE FROM cache_edna_items WHERE monday_id = ?",
+            [(mid,) for mid in to_delete],
+        )
+        conn.commit()
+    return len(to_delete)
+
+
 def get_cached_updated_at(conn: sqlite3.Connection, table: str) -> dict[str, str]:
     """Return {monday_id: monday_updated_at} for warm-upsert comparison."""
     rows = conn.execute(

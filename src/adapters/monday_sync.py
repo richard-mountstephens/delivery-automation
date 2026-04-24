@@ -12,6 +12,7 @@ from config.settings import get_monday_token, load_settings
 from src.adapters.monday import MondayAdapter
 from src.store.cache import (
     bulk_upsert_edna_items,
+    delete_edna_items_not_in,
     bulk_upsert_submission_items,
     bulk_upsert_velma_items,
     get_cached_updated_at,
@@ -167,6 +168,12 @@ def sync_monday_quick(db_path: str | Path, settings: dict | None = None) -> Sync
     print("Quick sync: Edna tracker (Active only)...")
     try:
         items = adapter.get_edna_items(groups=["Active"])
+        active_groups = sorted({item.board_group for item in items if item.board_group})
+        scope = active_groups or ["Active"]
+        keep_ids = {item.monday_id for item in items}
+        pruned = delete_edna_items_not_in(conn, keep_ids, board_groups=scope)
+        if pruned:
+            print(f"  Pruned {pruned} stale edna item(s) from {scope}")
         edna_synced, edna_unchanged = _warm_upsert(
             conn, items, "cache_edna_items", bulk_upsert_edna_items, "edna items",
         )
@@ -226,8 +233,14 @@ def sync_monday(db_path: str | Path, settings: dict | None = None) -> SyncResult
     edna_synced = 0
     edna_unchanged = 0
     print("Processing edna items...")
+    edna_fetch_ok = "edna" in raw and not any("edna" in e.lower() for e in fetch_errors)
     try:
         items = adapter.parse_edna_items(raw.get("edna", []))
+        if edna_fetch_ok:
+            keep_ids = {item.monday_id for item in items}
+            pruned = delete_edna_items_not_in(conn, keep_ids)
+            if pruned:
+                print(f"  Pruned {pruned} stale edna item(s)")
         edna_synced, edna_unchanged = _warm_upsert(
             conn, items, "cache_edna_items", bulk_upsert_edna_items, "edna items",
         )
